@@ -9,7 +9,7 @@ pub fn app_init() -> eframe::Result {
             ..Default::default()
         },
         Box::new(|cc| {
-            cc.egui_ctx.set_zoom_factor(2.0);
+            cc.egui_ctx.set_zoom_factor(1.6);
             catppuccin_egui::set_theme(&cc.egui_ctx, catppuccin_egui::LATTE);
             Ok(Box::<FileKrakenApp>::default())
         }),

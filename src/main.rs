@@ -3,7 +3,9 @@
 
 mod tabs;
 mod app_init;
+mod location;
 
+use egui::RichText;
 use crate::app_init::app_init;
 use crate::tabs::FileKrakenMainTabs;
 
@@ -19,14 +21,16 @@ impl eframe::App for FileKrakenApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("File Kraken");
+            ui.add_space(10.0);
             ui.horizontal(|ui| {
                 ui.horizontal(|ui| {
-                    ui.selectable_value(&mut self.tabs, FileKrakenMainTabs::Locations, "Locations");
-                    ui.selectable_value(&mut self.tabs, FileKrakenMainTabs::Files, "Files");
+                    ui.selectable_value(&mut self.tabs, FileKrakenMainTabs::Locations, RichText::new("Locations"));
+                    ui.selectable_value(&mut self.tabs, FileKrakenMainTabs::Files, RichText::new("Files"));
                 });
             });
+            ui.separator();
             match self.tabs {
-                FileKrakenMainTabs::Locations => self.locations_tab(ui),
+                FileKrakenMainTabs::Locations => self.locations_tab(ui, None),
                 FileKrakenMainTabs::Files => self.files_tab(ui),
             }
             /*
@@ -48,7 +52,7 @@ impl eframe::App for FileKrakenApp {
 fn main() -> eframe::Result {
     // init env logger
     env_logger::init();
-    
+
     // run the app
     app_init()
 }
