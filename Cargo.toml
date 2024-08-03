@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+catppuccin-egui = { version = "5.2.0", default-features = false, features = ["egui28"] }
 eframe = "0.28.1"
+egui = "0.28.1"
 egui_extras = "0.28.1"
 env_logger = "0.11.5"
