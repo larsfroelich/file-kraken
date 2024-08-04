@@ -1,5 +1,6 @@
-mod tab_locations;
-mod tab_files;
+
+pub mod tab_locations;
+pub mod tab_files;
 
 #[derive(Default, PartialEq)]
 pub enum FileKrakenMainTabs {

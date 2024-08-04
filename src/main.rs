@@ -5,14 +5,15 @@ mod tabs;
 mod app_init;
 mod location;
 
-use egui::{Align, FontId, Layout, RichText, TextStyle, vec2, Vec2};
+use egui::{Align, FontId, Layout, RichText, Vec2};
 use crate::app_init::app_init;
-use crate::tabs::FileKrakenMainTabs;
+use crate::tabs::{FileKrakenMainTabs};
+use crate::tabs::tab_locations::LocationTabState;
 
 #[derive(Default)]
 pub struct FileKrakenApp {
-    tabs: FileKrakenMainTabs,
-    selected_location: Option<u32>,
+    current_tab: FileKrakenMainTabs,
+    tab_state_locations: LocationTabState,
 }
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -31,12 +32,12 @@ impl eframe::App for FileKrakenApp {
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 ui.horizontal(|ui| {
-                    ui.selectable_value(&mut self.tabs, FileKrakenMainTabs::Locations, RichText::new("Locations"));
-                    ui.selectable_value(&mut self.tabs, FileKrakenMainTabs::Files, RichText::new("Files"));
+                    ui.selectable_value(&mut self.current_tab, FileKrakenMainTabs::Locations, RichText::new("Locations"));
+                    ui.selectable_value(&mut self.current_tab, FileKrakenMainTabs::Files, RichText::new("Files"));
                 });
             });
             ui.separator();
-            match self.tabs {
+            match self.current_tab {
                 FileKrakenMainTabs::Locations => self.locations_tab(ui, None),
                 FileKrakenMainTabs::Files => self.files_tab(ui),
             }
