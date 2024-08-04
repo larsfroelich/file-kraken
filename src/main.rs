@@ -5,7 +5,7 @@ mod tabs;
 mod app_init;
 mod location;
 
-use egui::{Align, FontId, Layout, RichText, vec2, Vec2};
+use egui::{Align, FontId, Layout, RichText, TextStyle, vec2, Vec2};
 use crate::app_init::app_init;
 use crate::tabs::FileKrakenMainTabs;
 
@@ -21,8 +21,11 @@ impl eframe::App for FileKrakenApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.allocate_ui_with_layout(Vec2::new(0.0,0.0), Layout::left_to_right(Align::BOTTOM) ,|ui| {
-                ui.label(RichText::new("File Kraken").font(FontId::proportional(40.0)).line_height(Some(40.0)));
-                ui.label(RichText::new(String::from(" v") + VERSION).font(FontId::proportional(20.0)).line_height(Some(40.0)));
+                ui.label(RichText::new("File Kraken").font(
+                    FontId::proportional(40.0)
+                ).line_height(Some(40.0)));
+                ui.label(RichText::from(String::from(" v") + VERSION).font(FontId::proportional(20.0))
+                );
             });
 
             ui.add_space(10.0);
