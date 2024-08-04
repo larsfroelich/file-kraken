@@ -11,7 +11,7 @@ pub fn app_init() -> eframe::Result {
         Box::new(|cc| {
             cc.egui_ctx.set_zoom_factor(1.6);
             catppuccin_egui::set_theme(&cc.egui_ctx, catppuccin_egui::LATTE);
-            Ok(Box::<FileKrakenApp>::default())
+            Ok(Box::from(FileKrakenApp::new()))
         }),
     )
 }
