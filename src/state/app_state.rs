@@ -52,7 +52,11 @@ impl AppState {
                         _ => FileKrakenLocationType::Normal,
                     }
                 }.clone();
-                self.locations_list.write().unwrap().push(location  );
+                self.files_by_location_by_path.write().unwrap().insert(
+                    location.path.clone(),
+                    Arc::new(RwLock::new(HashMap::new())),
+                );
+                self.locations_list.write().unwrap().push(location );
             }
         }
 
@@ -68,11 +72,38 @@ impl AppState {
         self.locations_list.read().unwrap()
     }
     
+    pub fn modify_location_type(&self, location_path: &str, location_type: FileKrakenLocationType) {
+        // do nothing if type is the same
+        let current_location_type = self.locations_list.read().unwrap().iter()
+            .find(|x| x.path == location_path)
+            .map(|x| x.location_type.clone())
+            .unwrap();
+        if current_location_type == location_type {
+            return;
+        }
+        
+        self.sqlite.as_ref().unwrap().execute(
+            "UPDATE locations SET location_type = ? WHERE path = ?;",
+            [&location_type.to_string(), location_path],
+        ).unwrap();
+        let mut locations_list = self.locations_list.write().unwrap();
+        for location in locations_list.iter_mut() {
+            if location.path == location_path {
+                location.location_type = location_type;
+                break;
+            }
+        }
+    }
+    
     pub fn add_location(&self, location: FileKrakenLocation) {
         self.sqlite.as_ref().unwrap().execute(
             "INSERT INTO locations (path, location_type) VALUES (?, ?);",
             [&location.path, &location.location_type.to_string()],
         ).unwrap();
+        self.files_by_location_by_path.write().unwrap().insert(
+            location.path.clone(),
+            Arc::new(RwLock::new(HashMap::new())),
+        );
         self.locations_list.write().unwrap().push(location);
     }
 

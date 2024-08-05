@@ -1,7 +1,5 @@
-use std::panic::Location;
 use egui::{Label, RichText, TextStyle, Ui, Window};
 use egui_extras::{Column, TableBody, TableBuilder};
-use log::{error, info, warn};
 use rfd::FileDialog;
 use crate::FileKrakenApp;
 use crate::state::location::{FileKrakenLocation, FileKrakenLocationType};
@@ -12,6 +10,9 @@ pub struct LocationTabState {
     add_location_path: String,
     add_location_type: FileKrakenLocationType,
     selected_location: Option<String>,
+    modify_location_dialog_open: bool,
+    modify_location_path: String,
+    modify_location_type: FileKrakenLocationType,
 }
 
 impl FileKrakenApp {
@@ -24,22 +25,111 @@ impl FileKrakenApp {
                 2,
                 |cols| {
                     cols[0].with_layout(egui::Layout::top_down(egui::Align::Min), |ui| left_column(self, ui));
-                    cols[1].with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                        egui::Frame::none()
-                            .fill(egui::Color32::LIGHT_GRAY)
-                            .outer_margin(12.0)
-                            .inner_margin(6.0)
-                            .show(ui, |ui| {
-                                ui.label("Details");
-                            });
-                    });
+                    cols[1].with_layout(egui::Layout::top_down(egui::Align::Center), |ui| right_column(self, ui));
                 }
             );
         });
         add_location_dialog_window(self, ui);
+        modify_location_dialog_window(self, ui);
     }
 }
 
+fn colored_box(ui: &mut Ui, color:egui::Color32, f: impl FnOnce(&mut Ui)) {
+    egui::Frame::none()
+        .fill(color)
+        .outer_margin(12.0)
+        .inner_margin(6.0)
+        .show(ui, f);
+}
+
+fn right_column(_self: &mut FileKrakenApp, ui: &mut Ui) {
+    if let Some(selected_location) = &_self.tab_state_locations.selected_location {
+        if let Some(location) = _self.app_state.read().unwrap().get_locations_list_readonly().iter().find(|x| x.path.eq(selected_location)){
+            colored_box(ui, egui::Color32::LIGHT_GRAY, |ui| {
+                ui.label("Location details:");
+            });
+            colored_box(ui, egui::Color32::TRANSPARENT, |ui| {
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Path:");
+                        ui.label(RichText::new(&location.path).text_style(TextStyle::Monospace));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Type:");
+                        ui.label(match location.location_type {
+                            FileKrakenLocationType::Normal => "Normal",
+                            FileKrakenLocationType::Preferred => "Preferred",
+                            FileKrakenLocationType::Excluded => "Excluded",
+                        });
+                        ui.button("📝").on_hover_text("Modify the location type").clicked().then(|| {   
+                            _self.tab_state_locations.modify_location_dialog_open = true;
+                            _self.tab_state_locations.modify_location_path = location.path.clone();
+                            _self.tab_state_locations.modify_location_type = location.location_type.clone();
+                        });
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Files:");
+                        ui.label(_self.app_state
+                            .read().unwrap()
+                            .get_files_by_location(&location.path).unwrap()
+                            .read().unwrap()
+                            .len().to_string());
+                    });
+                });
+            });
+
+            colored_box(ui, egui::Color32::LIGHT_GRAY, |ui| {
+                ui.label("Location status:");
+            });
+            colored_box(ui, egui::Color32::TRANSPARENT, |ui| {
+                ui.vertical(|ui| {});
+            });
+        }else {
+            colored_box(ui, egui::Color32::LIGHT_GRAY, |ui| {
+                ui.vertical_centered_justified(|ui|ui.label("Selected location not found"));
+            });
+        }
+    }else {
+        colored_box(ui, egui::Color32::LIGHT_GRAY, |ui| {
+            ui.vertical_centered_justified(|ui|ui.label("No location selected"));
+        });
+    }
+}
+
+fn modify_location_dialog_window(_self: &mut FileKrakenApp, ui: &mut Ui) {
+    let app_state = _self.app_state.clone();
+    let mut modify_location_dialog_open = _self.tab_state_locations.modify_location_dialog_open;
+    Window::new("Modify location")
+        .open(&mut _self.tab_state_locations.modify_location_dialog_open)
+        .show(ui.ctx(), |ui| {
+            ui.label("Modify location");
+            ui.horizontal(|ui| {
+                ui.label("Path:");
+                ui.monospace(&_self.tab_state_locations.modify_location_path);
+            });
+            ui.horizontal(|ui| {
+                ui.label("Type:");
+                ui.radio_value(&mut _self.tab_state_locations.modify_location_type, FileKrakenLocationType::Normal, "Normal");
+                ui.radio_value(&mut _self.tab_state_locations.modify_location_type, FileKrakenLocationType::Preferred, "Preferred")
+                    .on_hover_text("Preferred locations are where files are kept when duplicates are found");
+                ui.radio_value(&mut _self.tab_state_locations.modify_location_type, FileKrakenLocationType::Excluded, "Excluded")
+                    .on_hover_text("Excluded locations are not scanned");
+            });
+            ui.vertical_centered_justified(|ui| {
+                if ui.button("Modify").clicked() {
+                    modify_location_dialog_open = false;
+                    app_state.write().unwrap().modify_location_type(
+                        &_self.tab_state_locations.modify_location_path.clone(),
+                        _self.tab_state_locations.modify_location_type.clone(),
+                    );
+                }
+                if ui.button("Cancel").clicked() {
+                    modify_location_dialog_open = false;
+                }
+            });
+        });
+    _self.tab_state_locations.modify_location_dialog_open &= modify_location_dialog_open;
+}
 
 fn add_location_dialog_window(_self: &mut FileKrakenApp, ui: &mut Ui) {
     let app_state = _self.app_state.clone();
@@ -57,8 +147,8 @@ fn add_location_dialog_window(_self: &mut FileKrakenApp, ui: &mut Ui) {
                             .add_filter("FileKraken Proj", &["fkrproj"])
                             .set_directory("/")
                             .pick_folder() {
-                                _self.tab_state_locations.add_location_path = String::from(folder.to_string_lossy());
-                            }
+                            _self.tab_state_locations.add_location_path = String::from(folder.to_string_lossy());
+                        }
                     });
                 });
             });
@@ -77,8 +167,6 @@ fn add_location_dialog_window(_self: &mut FileKrakenApp, ui: &mut Ui) {
                         path: _self.tab_state_locations.add_location_path.clone(),
                         location_type: _self.tab_state_locations.add_location_type.clone(),
                     });
-                    // add the location
-                    error!("Adding location: {} {:?}", _self.tab_state_locations.add_location_path, _self.tab_state_locations.add_location_type);
                 }
             });
         });
