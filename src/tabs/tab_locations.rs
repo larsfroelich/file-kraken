@@ -173,15 +173,15 @@ fn modify_location_dialog_window(_self: &mut FileKrakenApp, ui: &mut Ui) {
                     FileKrakenLocationType::Preferred,
                     "Preferred",
                 )
-                    .on_hover_text(
-                        "Preferred locations are where files are kept when duplicates are found",
-                    );
+                .on_hover_text(
+                    "Preferred locations are where files are kept when duplicates are found",
+                );
                 ui.radio_value(
                     &mut _self.tab_state_locations.modify_location_type,
                     FileKrakenLocationType::Excluded,
                     "Excluded",
                 )
-                    .on_hover_text("Excluded locations are not scanned");
+                .on_hover_text("Excluded locations are not scanned");
             });
             ui.vertical_centered_justified(|ui| {
                 if ui.button("Modify").clicked() {
@@ -214,10 +214,7 @@ fn add_location_dialog_window(_self: &mut FileKrakenApp, ui: &mut Ui) {
                         .on_hover_text("Browse for a folder")
                         .clicked()
                         .then(|| {
-                            if let Some(folder) = FileDialog::new()
-                                .add_filter("FileKraken Proj", &["fkrproj"])
-                                .set_directory("/")
-                                .pick_folder()
+                            if let Some(folder) = FileDialog::new().set_directory("/").pick_folder()
                             {
                                 _self.tab_state_locations.add_location_path =
                                     String::from(folder.to_string_lossy());
@@ -237,15 +234,15 @@ fn add_location_dialog_window(_self: &mut FileKrakenApp, ui: &mut Ui) {
                     FileKrakenLocationType::Preferred,
                     "Preferred",
                 )
-                    .on_hover_text(
-                        "Preferred locations are where files are kept when duplicates are found",
-                    );
+                .on_hover_text(
+                    "Preferred locations are where files are kept when duplicates are found",
+                );
                 ui.radio_value(
                     &mut _self.tab_state_locations.add_location_type,
                     FileKrakenLocationType::Excluded,
                     "Excluded",
                 )
-                    .on_hover_text("Excluded locations are not scanned");
+                .on_hover_text("Excluded locations are not scanned");
             });
             ui.vertical_centered_justified(|ui| {
                 if ui.button("Add").clicked() {
@@ -335,14 +332,14 @@ fn table_row(
         row.col(|ui| {
             if ui.button("🗑️").clicked()
                 && rfd::MessageDialog::new()
-                .set_title("Remove location")
-                .set_description(&format!(
-                    "Are you sure you want to remove the location: \"{}\"?",
-                    path
-                ))
-                .set_buttons(rfd::MessageButtons::YesNo)
-                .show()
-                .eq(&rfd::MessageDialogResult::Yes)
+                    .set_title("Remove location")
+                    .set_description(&format!(
+                        "Are you sure you want to remove the location: \"{}\"?",
+                        path
+                    ))
+                    .set_buttons(rfd::MessageButtons::YesNo)
+                    .show()
+                    .eq(&rfd::MessageDialogResult::Yes)
             {
                 let _app_state = app_state.clone();
                 let _path = path.to_string();
@@ -379,10 +376,10 @@ fn table_row(
                 ));
             }
         })
-            .1
-            .clicked()
-            .then(|| {
-                *selected_location = Some(path.to_string());
-            });
+        .1
+        .clicked()
+        .then(|| {
+            *selected_location = Some(path.to_string());
+        });
     });
 }

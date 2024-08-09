@@ -73,10 +73,7 @@ impl eframe::App for FileKrakenApp {
                             ui.label("or");
                             ui.add_space(8.0);
                             if ui.button("➕ create new project file").clicked() {
-                                let maybe_file = FileDialog::new()
-                                    .add_filter("FileKraken Proj", &["fkrproj"])
-                                    .set_directory("/")
-                                    .save_file();
+                                let maybe_file = FileDialog::new().set_directory("/").save_file();
                                 if let Some(mut file) = maybe_file {
                                     if !file.ends_with(".fkrproj") {
                                         file.set_extension("fkrproj");
