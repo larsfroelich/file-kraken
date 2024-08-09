@@ -1,5 +1,6 @@
 use crate::processing::scan::scan_location_files;
-use crate::state::location::FileKrakenLocationType;
+use crate::state::location::{FileKrakenLocationState, FileKrakenLocationType};
+use crate::utils::ui_elements::colored_box;
 use crate::FileKrakenApp;
 use egui::{Label, RichText, TextStyle, Ui, Window};
 use egui_extras::{Column, TableBody, TableBuilder};
@@ -34,22 +35,9 @@ impl FileKrakenApp {
     }
 }
 
-fn colored_box(ui: &mut Ui, color: egui::Color32, f: impl FnOnce(&mut Ui)) {
-    egui::Frame::none()
-        .fill(color)
-        .outer_margin(12.0)
-        .inner_margin(6.0)
-        .show(ui, f);
-}
-
 fn right_column(_self: &mut FileKrakenApp, ui: &mut Ui) {
     if let Some(selected_location) = &_self.tab_state_locations.selected_location {
-        if let Some(location) = _self
-            .app_state
-            .read()
-            .unwrap()
-            .get_location_clone(selected_location)
-        {
+        if let Some(location) = _self.app_state.get_location_clone(selected_location) {
             colored_box(ui, egui::Color32::LIGHT_GRAY, |ui| {
                 ui.label("Location details:");
             });
@@ -82,8 +70,6 @@ fn right_column(_self: &mut FileKrakenApp, ui: &mut Ui) {
                         ui.label(
                             _self
                                 .app_state
-                                .read()
-                                .unwrap()
                                 .get_files_by_location(&location.path)
                                 .unwrap()
                                 .read()
@@ -104,22 +90,34 @@ fn right_column(_self: &mut FileKrakenApp, ui: &mut Ui) {
 
             colored_box(ui, egui::Color32::LIGHT_GRAY, |ui| {
                 ui.label("Location status:");
-                ui.button("Scan location")
-                    .on_hover_text("Scan the location for files")
-                    .clicked()
-                    .then(|| {
-                        // new thread
-                        let _app_state = _self.app_state.clone();
-                        let _path = location.path.clone();
-                        thread::spawn(move || {
-                            scan_location_files(_app_state, &_path);
-                        });
-
-                        // scan_location_files(_self.app_state.clone(), &location.path);
-                    });
             });
             colored_box(ui, egui::Color32::TRANSPARENT, |ui| {
-                ui.vertical(|ui| {});
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("State:");
+                        ui.label(match location.location_state {
+                            FileKrakenLocationState::Unscanned => "Not scanned",
+                            FileKrakenLocationState::PartialScanned => "Partially scanned",
+                            FileKrakenLocationState::Scanned => "Scanned",
+                            FileKrakenLocationState::Scanning => "Scanning ...",
+                        });
+                        if location.location_state == FileKrakenLocationState::Scanning {
+                            ui.spinner();
+                        }
+                    });
+
+                    ui.button("Scan location")
+                        .on_hover_text("Scan the location for files")
+                        .clicked()
+                        .then(|| {
+                            // new thread
+                            let _app_state = _self.app_state.clone();
+                            let _path = location.path.clone();
+                            thread::spawn(move || {
+                                scan_location_files(_app_state.clone(), &_path);
+                            });
+                        });
+                });
             });
         } else {
             colored_box(ui, egui::Color32::LIGHT_GRAY, |ui| {
@@ -169,7 +167,7 @@ fn modify_location_dialog_window(_self: &mut FileKrakenApp, ui: &mut Ui) {
             ui.vertical_centered_justified(|ui| {
                 if ui.button("Modify").clicked() {
                     modify_location_dialog_open = false;
-                    app_state.write().unwrap().modify_location_type(
+                    app_state.modify_location_type(
                         &_self.tab_state_locations.modify_location_path.clone(),
                         _self.tab_state_locations.modify_location_type.clone(),
                     );
@@ -234,11 +232,11 @@ fn add_location_dialog_window(_self: &mut FileKrakenApp, ui: &mut Ui) {
                 if ui.button("Add").clicked() {
                     add_location_dialog_open = false;
 
-                    let app_state_rw = app_state.write().unwrap();
-                    app_state_rw.add_location(
+                    app_state.add_location(
                         true,
                         &_self.tab_state_locations.add_location_path,
                         &_self.tab_state_locations.add_location_type,
+                        &FileKrakenLocationState::Unscanned,
                     );
                 }
             });
@@ -273,12 +271,7 @@ fn left_column(_self: &mut FileKrakenApp, ui: &mut Ui) {
                             });
                         })
                         .body(|mut body| {
-                            for location in app_state
-                                .read()
-                                .unwrap()
-                                .get_locations_list_readonly()
-                                .iter()
-                            {
+                            for location in app_state.get_locations_list_readonly().iter() {
                                 table_row(
                                     &mut body,
                                     &location.path,

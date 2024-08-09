@@ -1,34 +1,36 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 #![allow(rustdoc::missing_crate_level_docs)] // it's an example
 
-mod tabs;
 mod app_init;
-mod state;
-mod utils;
 mod processing;
+mod state;
+mod tabs;
+mod utils;
 
-use std::rc::Rc;
-use std::sync::{Arc, RwLock};
+use crate::app_init::app_init;
+use crate::tabs::tab_files::FileKrakenFileTabs;
+use crate::tabs::tab_locations::LocationTabState;
+use crate::tabs::FileKrakenMainTabs;
+use crate::utils::dialogs::error_dialog;
 use egui::{Align, FontId, Layout, RichText, Vec2};
 use rfd::FileDialog;
-use crate::app_init::app_init;
-use crate::tabs::FileKrakenMainTabs;
-use crate::tabs::tab_locations::LocationTabState;
-use crate::utils::dialogs::error_dialog;
+use std::sync::Arc;
 
 #[derive(Default)]
 pub struct FileKrakenApp {
     current_tab: FileKrakenMainTabs,
 
+    current_files_tab: FileKrakenFileTabs,
+
     // state for each tab
     tab_state_locations: LocationTabState,
 
     // main app state
-    app_state : Arc<RwLock<state::AppState>>
+    app_state: Arc<state::AppState>,
 }
 
-fn try_connect_sqlite(_self : &mut FileKrakenApp, path: &str) -> () {
-    if let Err(err) = _self.app_state.write().unwrap().connect_sqlite(path) {
+fn try_connect_sqlite(_self: &mut FileKrakenApp, path: &str) -> () {
+    if let Err(err) = _self.app_state.connect_sqlite(path) {
         error_dialog(&format!("Failed to create project file. Error: {}", err));
     }
 }
@@ -36,7 +38,7 @@ fn try_connect_sqlite(_self : &mut FileKrakenApp, path: &str) -> () {
 impl FileKrakenApp {
     pub fn new() -> Self {
         let mut _self = Self::default();
-        
+
         if let Ok(location) = std::env::var("FILE_KRAKEN_PROJECT_FILE") {
             try_connect_sqlite(&mut _self, &location);
         }
@@ -49,62 +51,74 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 impl eframe::App for FileKrakenApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            if self.app_state.read().unwrap().is_sqlite_connected() == false {
-                ui.centered_and_justified(
-                    |ui| {
+            if self.app_state.is_sqlite_connected() == false {
+                ui.centered_and_justified(|ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.heading("File Kraken");
+                        ui.add_space(10.0);
+                        ui.label("Please load a project file or create a new one");
+                        ui.add_space(20.0);
                         ui.vertical_centered(|ui| {
-                            ui.heading("File Kraken");
-                            ui.add_space(10.0);
-                            ui.label("Please load a project file or create a new one");
-                            ui.add_space(20.0);
-                            ui.vertical_centered(
-                                |ui| {
-                                
-                                    
-                                if ui.button("load existing project").clicked() {
-                                    let maybe_file = FileDialog::new()
-                                        .add_filter("FileKraken Proj", &["fkrproj"])
-                                        .set_directory("/")
-                                        .pick_file();
+                            if ui.button("load existing project").clicked() {
+                                let maybe_file = FileDialog::new()
+                                    .add_filter("FileKraken Proj", &["fkrproj"])
+                                    .set_directory("/")
+                                    .pick_file();
 
-                                    if let Some(file) = maybe_file {
-                                        try_connect_sqlite(self, file.to_str().unwrap());
-                                    }
+                                if let Some(file) = maybe_file {
+                                    try_connect_sqlite(self, file.to_str().unwrap());
                                 }
-                                ui.add_space(8.0);
-                                ui.label("or");
-                                ui.add_space(8.0);
-                                if ui.button("➕ create new project file").clicked() {
-                                    let maybe_file = FileDialog::new()
-                                        .add_filter("FileKraken Proj", &["fkrproj"])
-                                        .set_directory("/")
-                                        .save_file();
-                                    if let Some(mut file) = maybe_file {
-                                        if !file.ends_with(".fkrproj") {
-                                            file.set_extension("fkrproj");
-                                        }
-                                        try_connect_sqlite(self, file.to_str().unwrap());
+                            }
+                            ui.add_space(8.0);
+                            ui.label("or");
+                            ui.add_space(8.0);
+                            if ui.button("➕ create new project file").clicked() {
+                                let maybe_file = FileDialog::new()
+                                    .add_filter("FileKraken Proj", &["fkrproj"])
+                                    .set_directory("/")
+                                    .save_file();
+                                if let Some(mut file) = maybe_file {
+                                    if !file.ends_with(".fkrproj") {
+                                        file.set_extension("fkrproj");
                                     }
+                                    try_connect_sqlite(self, file.to_str().unwrap());
                                 }
-                            });
+                            }
                         });
+                    });
                 });
                 return;
             }
-            
-            ui.allocate_ui_with_layout(Vec2::new(0.0,0.0), Layout::left_to_right(Align::BOTTOM) ,|ui| {
-                ui.label(RichText::new("File Kraken")
-                    .font(FontId::proportional(40.0))
-                    .line_height(Some(40.0)));
-                ui.label(RichText::from(String::from(" v") + VERSION)
-                    .font(FontId::proportional(20.0)));
-            });
+
+            ui.allocate_ui_with_layout(
+                Vec2::new(0.0, 0.0),
+                Layout::left_to_right(Align::BOTTOM),
+                |ui| {
+                    ui.label(
+                        RichText::new("File Kraken")
+                            .font(FontId::proportional(40.0))
+                            .line_height(Some(40.0)),
+                    );
+                    ui.label(
+                        RichText::from(String::from(" v") + VERSION)
+                            .font(FontId::proportional(20.0)),
+                    );
+                },
+            );
 
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 ui.horizontal(|ui| {
-                    ui.selectable_value(&mut self.current_tab, FileKrakenMainTabs::Locations, RichText::new("Locations"));
-                    ui.selectable_value(&mut self.current_tab, FileKrakenMainTabs::Files, RichText::new("Files"));
+                    ui.selectable_value(
+                        &mut self.current_tab,
+                        FileKrakenMainTabs::Locations,
+                        RichText::new("Locations"),
+                    );
+                    ui.selectable_value(
+                        &mut self.current_tab,
+                        FileKrakenMainTabs::Files,
+                        RichText::new("Files"),
+                    );
                 });
             });
             ui.separator();
@@ -123,5 +137,3 @@ fn main() -> eframe::Result {
     // run the app
     app_init()
 }
-
-
