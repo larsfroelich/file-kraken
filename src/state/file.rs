@@ -1,3 +1,4 @@
+#[derive(Default, Debug, Clone)]
 pub struct FileKrakenFile {
     pub path: String,
     pub file_type: FileKrakenFileType,

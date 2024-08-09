@@ -1,10 +1,12 @@
 use crate::processing::scan::scan_location_files;
 use crate::state::location::{FileKrakenLocationState, FileKrakenLocationType};
+use crate::state::AppState;
 use crate::utils::ui_elements::colored_box;
 use crate::FileKrakenApp;
 use egui::{Label, RichText, TextStyle, Ui, Window};
 use egui_extras::{Column, TableBody, TableBuilder};
 use rfd::FileDialog;
+use std::sync::Arc;
 use std::thread;
 
 #[derive(Default, PartialEq)]
@@ -45,7 +47,17 @@ fn right_column(_self: &mut FileKrakenApp, ui: &mut Ui) {
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
                         ui.label("Path:");
-                        ui.label(RichText::new(&location.path).text_style(TextStyle::Monospace));
+                        if location.location_state == FileKrakenLocationState::Deleting {
+                            ui.label(
+                                RichText::new(&location.path)
+                                    .text_style(TextStyle::Monospace)
+                                    .strikethrough(),
+                            );
+                        } else {
+                            ui.label(
+                                RichText::new(&location.path).text_style(TextStyle::Monospace),
+                            );
+                        }
                     });
                     ui.horizontal(|ui| {
                         ui.label("Type:");
@@ -100,23 +112,30 @@ fn right_column(_self: &mut FileKrakenApp, ui: &mut Ui) {
                             FileKrakenLocationState::PartialScanned => "Partially scanned",
                             FileKrakenLocationState::Scanned => "Scanned",
                             FileKrakenLocationState::Scanning => "Scanning ...",
+                            FileKrakenLocationState::Deleting => "⚠️ Deleting ...",
                         });
-                        if location.location_state == FileKrakenLocationState::Scanning {
+                        if location.location_state == FileKrakenLocationState::Scanning
+                            || location.location_state == FileKrakenLocationState::Deleting
+                        {
                             ui.spinner();
                         }
                     });
 
-                    ui.button("Scan location")
-                        .on_hover_text("Scan the location for files")
-                        .clicked()
-                        .then(|| {
-                            // new thread
-                            let _app_state = _self.app_state.clone();
-                            let _path = location.path.clone();
-                            thread::spawn(move || {
-                                scan_location_files(_app_state.clone(), &_path);
+                    if location.location_state != FileKrakenLocationState::Scanning
+                        && location.location_state != FileKrakenLocationState::Deleting
+                    {
+                        ui.button("Scan location")
+                            .on_hover_text("Scan the location for files")
+                            .clicked()
+                            .then(|| {
+                                // new thread
+                                let _app_state = _self.app_state.clone();
+                                let _path = location.path.clone();
+                                thread::spawn(move || {
+                                    scan_location_files(_app_state.clone(), &_path);
+                                });
                             });
-                        });
+                    }
                 });
             });
         } else {
@@ -238,6 +257,10 @@ fn add_location_dialog_window(_self: &mut FileKrakenApp, ui: &mut Ui) {
                         &_self.tab_state_locations.add_location_type,
                         &FileKrakenLocationState::Unscanned,
                     );
+
+                    // reset the dialog
+                    _self.tab_state_locations.add_location_path = String::new();
+                    _self.tab_state_locations.add_location_type = FileKrakenLocationType::Normal;
                 }
             });
         });
@@ -260,6 +283,7 @@ fn left_column(_self: &mut FileKrakenApp, ui: &mut Ui) {
                     TableBuilder::new(ui)
                         .sense(egui::Sense::click())
                         .column(Column::auto())
+                        .column(Column::auto())
                         .column(Column::remainder())
                         .cell_layout(egui::Layout::top_down_justified(egui::Align::LEFT))
                         .header(25.0, |mut row| {
@@ -273,9 +297,11 @@ fn left_column(_self: &mut FileKrakenApp, ui: &mut Ui) {
                         .body(|mut body| {
                             for location in app_state.get_locations_list_readonly().iter() {
                                 table_row(
+                                    &app_state,
                                     &mut body,
                                     &location.path,
                                     &location.location_type,
+                                    &location.location_state,
                                     &mut _self.tab_state_locations.selected_location,
                                 );
                             }
@@ -292,9 +318,11 @@ fn left_column(_self: &mut FileKrakenApp, ui: &mut Ui) {
 
 // render a single row of the locations table
 fn table_row(
+    app_state: &Arc<AppState>,
     body: &mut TableBody,
     path: &str,
     location_type: &FileKrakenLocationType,
+    location_state: &FileKrakenLocationState,
     selected_location: &mut Option<String>,
 ) {
     body.row(18.0, |mut row| {
@@ -303,6 +331,26 @@ fn table_row(
                 .as_ref()
                 .is_some_and(|x| x.eq(&String::from(path))),
         );
+
+        row.col(|ui| {
+            if ui.button("🗑️").clicked()
+                && rfd::MessageDialog::new()
+                .set_title("Remove location")
+                .set_description(&format!(
+                    "Are you sure you want to remove the location: \"{}\"?",
+                    path
+                ))
+                .set_buttons(rfd::MessageButtons::YesNo)
+                .show()
+                .eq(&rfd::MessageDialogResult::Yes)
+            {
+                let _app_state = app_state.clone();
+                let _path = path.to_string();
+                thread::spawn(move || {
+                    _app_state.remove_location(true, &_path);
+                });
+            }
+        });
         row.col(|ui| match location_type {
             FileKrakenLocationType::Preferred => {
                 ui.add(Label::selectable(Label::new("⭐"), false));
@@ -313,7 +361,9 @@ fn table_row(
             _ => {}
         });
         row.col(|ui| {
-            if location_type == &FileKrakenLocationType::Excluded {
+            if location_type == &FileKrakenLocationType::Excluded
+                || location_state == &FileKrakenLocationState::Deleting
+            {
                 ui.add(Label::selectable(
                     Label::new(
                         RichText::new(path)

@@ -16,7 +16,7 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
     }
     app_state.modify_location_state(true, location_path, FileKrakenLocationState::Scanning);
 
-    for entry in WalkDir::new(location_path).sort(true) {
+    for entry in WalkDir::new(location_path) {
         if let Ok(entry) = entry {
             if entry.file_type.is_file() {
                 let file_type = if let Some(file_extension) = entry.path().extension() {

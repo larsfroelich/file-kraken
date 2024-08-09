@@ -162,6 +162,86 @@ impl AppState {
         self.sqlite.lock().unwrap().is_some()
     }
 
+    pub fn remove_location(&self, persist_to_db: bool, location_path: &str) {
+        self.locations_list
+            .write()
+            .unwrap()
+            .iter_mut()
+            .find(|x| x.path == location_path)
+            .expect(&format!("location {} not found", location_path))
+            .location_state = FileKrakenLocationState::Deleting;
+
+        if persist_to_db {
+            self.sqlite
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .execute("DELETE FROM locations WHERE path = ?1", [location_path])
+                .unwrap();
+        }
+
+        let files = {
+            self.get_files_by_location(location_path)
+                .unwrap()
+                .read()
+                .unwrap()
+                .keys()
+                .map(|x| x.clone())
+                .collect::<Vec<String>>()
+        };
+
+        for file in files {
+            self.remove_file(true, false, &file);
+        }
+
+        self.files_by_location_by_path
+            .write()
+            .unwrap()
+            .remove(location_path);
+
+        let mut locations_list = self.locations_list.write().unwrap();
+        locations_list.retain(|x| x.path != location_path);
+    }
+
+    pub fn remove_file(&self, persist_to_db: bool, persist_to_disk: bool, file_path: &str) {
+        if persist_to_disk {
+            match std::fs::remove_file(file_path) {
+                Ok(_) => {}
+                Err(_) => {
+                    rfd::MessageDialog::new()
+                        .set_title("Error")
+                        .set_description("Failed to delete file")
+                        .show();
+                    return;
+                }
+            }
+        }
+
+        if persist_to_db {
+            let sqlite_lock = self.sqlite.lock().unwrap();
+            let mut delete_file = sqlite_lock
+                .as_ref()
+                .unwrap()
+                .prepare("DELETE FROM files WHERE path = ?1")
+                .unwrap();
+            delete_file.execute([file_path]).unwrap();
+        }
+
+        let file_parent_location_path =
+            get_longest_parent_path(&file_path, self.get_locations_list_readonly().iter())
+                .expect(&format!("no parent location found for file {}", file_path));
+
+        self.files_by_location_by_path
+            .read()
+            .unwrap()
+            .get(&file_parent_location_path)
+            .unwrap()
+            .write()
+            .unwrap()
+            .remove(file_path);
+    }
+
     pub fn add_file(
         &self,
         persist_to_db: bool,
@@ -252,10 +332,15 @@ impl AppState {
             );
         }
 
-        let files_by_location = self.files_by_location_by_path.read().unwrap();
-        files_by_location
-            .get(location_path)
-            .unwrap()
+        let location_files = {
+            self.files_by_location_by_path
+                .read()
+                .unwrap()
+                .get(location_path)
+                .unwrap()
+                .clone()
+        };
+        location_files
             .write()
             .unwrap()
             .insert(file_path.to_string(), file);

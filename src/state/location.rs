@@ -16,6 +16,7 @@ pub enum FileKrakenLocationState {
     PartialScanned,
     Scanned,
     Scanning,
+    Deleting,
 }
 
 impl fmt::Display for FileKrakenLocationState {
@@ -28,6 +29,7 @@ impl fmt::Display for FileKrakenLocationState {
                 FileKrakenLocationState::PartialScanned => "partial_scanned",
                 FileKrakenLocationState::Scanned => "scanned",
                 FileKrakenLocationState::Scanning => "scanning",
+                FileKrakenLocationState::Deleting => "deleting",
             }
         )
     }
