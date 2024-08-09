@@ -5,9 +5,10 @@ mod tabs;
 mod app_init;
 mod state;
 mod utils;
+mod processing;
 
 use std::rc::Rc;
-use std::sync::{RwLock};
+use std::sync::{Arc, RwLock};
 use egui::{Align, FontId, Layout, RichText, Vec2};
 use rfd::FileDialog;
 use crate::app_init::app_init;
@@ -23,7 +24,7 @@ pub struct FileKrakenApp {
     tab_state_locations: LocationTabState,
 
     // main app state
-    app_state : Rc<RwLock<state::AppState>>
+    app_state : Arc<RwLock<state::AppState>>
 }
 
 fn try_connect_sqlite(_self : &mut FileKrakenApp, path: &str) -> () {

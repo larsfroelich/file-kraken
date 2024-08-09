@@ -1,11 +1,11 @@
-use std::error::Error;
 use std::fmt;
 use std::fmt::Formatter;
 
 #[derive(PartialEq, Default, Debug, Clone)]
 pub struct FileKrakenLocation {
     pub path: String,
-    pub location_type: FileKrakenLocationType
+    pub location_type: FileKrakenLocationType,
+    pub parent_location_path: Option<String>
 }
 
 #[derive(PartialEq, Default, Debug, Clone)]
