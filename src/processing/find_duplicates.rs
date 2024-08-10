@@ -45,7 +45,9 @@ pub fn find_file_duplicates(app_state: Arc<AppState>) {
 
     let files_by_size_by_hash = Arc::new(RwLock::new(HashMap::default()));
     let mut duplicates_search_by_filesize_threads = vec![];
-    let chunk_size = duplicate_file_sizes.len() / 16;
+    let nr_total_sizes_to_check = duplicate_file_sizes.len();
+    let chunk_size = nr_total_sizes_to_check / 16;
+    let sizes_checked_so_far = Arc::new(RwLock::new(0f64));
 
     for duplicate_file_size_chunk in duplicate_file_sizes
         .chunks_mut(max(1, chunk_size))
@@ -53,6 +55,8 @@ pub fn find_file_duplicates(app_state: Arc<AppState>) {
     {
         let app_state = app_state.clone();
         let files_by_size_by_hash = files_by_size_by_hash.clone();
+        let nr_total_sizes_to_check = nr_total_sizes_to_check as f64;
+        let sizes_checked_so_far = sizes_checked_so_far.clone();
         duplicates_search_by_filesize_threads.push(std::thread::spawn(move || {
             for duplicate_file_size in duplicate_file_size_chunk {
                 let mut files_by_size: Vec<FileKrakenFile> =
@@ -61,8 +65,11 @@ pub fn find_file_duplicates(app_state: Arc<AppState>) {
                 set_processing_message(
                     &app_state,
                     &format!(
-                        "Calculating hashes for {} files of size {}",
-                        nr_files_by_size, duplicate_file_size
+                        "{:.2}% | Calculating hashes for {} files of size {}",
+                        sizes_checked_so_far.read().unwrap().clone() * 100.0
+                            / nr_total_sizes_to_check,
+                        nr_files_by_size,
+                        duplicate_file_size
                     ),
                 );
                 let mut threads = vec![];
@@ -93,6 +100,7 @@ pub fn find_file_duplicates(app_state: Arc<AppState>) {
                 for thread in threads {
                     thread.join().unwrap();
                 }
+                *sizes_checked_so_far.write().unwrap() += 1.0;
             }
         }));
     }
