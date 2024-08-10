@@ -105,16 +105,17 @@ impl FileKrakenApp {
                                         let total_nr_duplicates = _duplicates.len();
                                         let mut nr_deleted = 0;
                                         for duplicate in _duplicates.iter() {
-                                            *_app_state
-                                                .find_duplicates_processing
-                                                .state
-                                                .write()
-                                                .unwrap()
-                                                .deref_mut() =
-                                                FindDuplicatesStateType::Processing(format!(
-                                                    "Deleting eligible duplicates ... ({}/{})",
-                                                    nr_deleted, total_nr_duplicates
-                                                ));
+                                            {
+                                                *_app_state
+                                                    .find_duplicates_processing
+                                                    .state
+                                                    .write()
+                                                    .unwrap() =
+                                                    FindDuplicatesStateType::Processing(format!(
+                                                        "Deleting eligible duplicates ... ({}/{})",
+                                                        nr_deleted, total_nr_duplicates
+                                                    ));
+                                            }
                                             if let Some(_) = &duplicate.deletable_file {
                                                 delete_duplicate(&_app_state, duplicate);
                                             }
@@ -124,8 +125,7 @@ impl FileKrakenApp {
                                             .find_duplicates_processing
                                             .state
                                             .write()
-                                            .unwrap()
-                                            .deref_mut() = FindDuplicatesStateType::Processed;
+                                            .unwrap() = FindDuplicatesStateType::Processed;
                                     });
                                 }
                             }

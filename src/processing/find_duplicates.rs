@@ -259,20 +259,30 @@ fn find_duplicate_file_sizes(
 
 pub fn delete_duplicate(app_state: &Arc<AppState>, duplicate: &FileKrakenDuplicate) {
     // delete from duplicates list
-    let mut duplicates_list = app_state
-        .find_duplicates_processing
-        .duplicates
-        .write()
-        .unwrap();
-    let duplicate_index = duplicates_list
-        .iter()
-        .position(|x| {
-            x.deletable_file
-                .as_ref()
-                .is_some_and(|file| file.path == duplicate.deletable_file.as_ref().unwrap().path)
-        })
-        .unwrap();
-    duplicates_list.remove(duplicate_index);
+    let duplicate_index = {
+        let duplicates_list = app_state
+            .find_duplicates_processing
+            .duplicates
+            .read()
+            .unwrap();
+
+        duplicates_list
+            .iter()
+            .position(|x| {
+                x.deletable_file.as_ref().is_some_and(|file| {
+                    file.path == duplicate.deletable_file.as_ref().unwrap().path
+                })
+            })
+            .unwrap()
+    };
+    {
+        app_state
+            .find_duplicates_processing
+            .duplicates
+            .write()
+            .unwrap()
+            .remove(duplicate_index);
+    }
 
     app_state.remove_file(true, true, &duplicate.deletable_file.as_ref().unwrap().path);
 }
