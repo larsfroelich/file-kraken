@@ -4,6 +4,7 @@ use crate::state::location::{FileKrakenLocation, FileKrakenLocationType};
 use crate::state::AppState;
 use crate::utils::get_longest_parent_path;
 use egui::ahash::HashMap;
+use std::cmp::max;
 use std::ops::DerefMut;
 use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
 
@@ -39,33 +40,77 @@ pub fn find_file_duplicates(app_state: Arc<AppState>) {
         .clear();
 
     set_processing_message(&app_state, "Scanning for file size matches...");
-    let duplicate_file_sizes = find_duplicate_file_sizes(&app_state.sqlite);
+    let mut duplicate_file_sizes =
+        find_duplicate_file_sizes(&app_state.sqlite).expect("Failed to get duplicate file sizes");
 
-    let mut files_by_size_by_hash = HashMap::default();
-    for duplicate_file_size in duplicate_file_sizes.expect("Failed to get duplicate file sizes") {
-        set_processing_message(
-            &app_state,
-            format!(
-                "Calculating hashes for files of size {}",
-                duplicate_file_size
-            )
-            .as_str(),
-        );
-        let mut duplicate_files = get_files_by_size(&app_state, duplicate_file_size).unwrap();
-        for file in &mut duplicate_files {
-            // calc hash
-            file.hash = Some(app_state.calculate_file_hash(&file.path));
-            files_by_size_by_hash
-                .entry(duplicate_file_size)
-                .or_insert(HashMap::default())
-                .entry(file.hash.clone().unwrap())
-                .or_insert(vec![])
-                .push(file.clone());
-        }
+    let files_by_size_by_hash = Arc::new(RwLock::new(HashMap::default()));
+
+    let mut duplicates_search_by_filesize_threads = vec![];
+
+    let chunk_size = duplicate_file_sizes.len() / 16;
+    for duplicate_file_size_chunk in duplicate_file_sizes
+        .chunks_mut(max(1, chunk_size))
+        .map(|x| x.to_owned())
+    {
+        let app_state = app_state.clone();
+        let files_by_size_by_hash = files_by_size_by_hash.clone();
+        duplicates_search_by_filesize_threads.push(std::thread::spawn(move || {
+            for duplicate_file_size in duplicate_file_size_chunk {
+                set_processing_message(
+                    &app_state,
+                    &format!(
+                        "Calculating hashes for files of size {}",
+                        duplicate_file_size
+                    ),
+                );
+                let mut files_by_size: Vec<FileKrakenFile> =
+                    get_files_by_size(&app_state, duplicate_file_size).unwrap();
+                let nr_files_by_size = files_by_size.len();
+                set_processing_message(
+                    &app_state,
+                    &format!(
+                        "Calculating hashes for {} files of size {}",
+                        nr_files_by_size, duplicate_file_size
+                    ),
+                );
+                let mut threads = vec![];
+                for files in files_by_size
+                    .chunks_mut(max(1, nr_files_by_size / 4))
+                    .map(|x| x.to_owned())
+                {
+                    {
+                        let files_by_size_by_hash = files_by_size_by_hash.clone();
+                        let _app_state = app_state.clone();
+                        threads.push(std::thread::spawn(move || {
+                            for mut file in files {
+                                // calc hash
+                                file.hash = Some(_app_state.calculate_file_hash(&file.path));
+                                files_by_size_by_hash
+                                    .write()
+                                    .unwrap()
+                                    .entry(duplicate_file_size)
+                                    .or_insert(HashMap::default())
+                                    .entry(file.hash.clone().unwrap())
+                                    .or_insert(vec![])
+                                    .push(file.clone());
+                            }
+                        }));
+                    }
+                }
+                for thread in threads {
+                    thread.join().unwrap();
+                }
+            }
+        }));
     }
+    for thread in duplicates_search_by_filesize_threads {
+        thread.join().unwrap();
+    }
+
     set_processing_message(&app_state, "Checking file-hashes for duplicates...");
-    for (_, files_by_hash) in files_by_size_by_hash.iter() {
-        for (_, files) in files_by_hash.iter() {
+    let files_by_size_by_hash_lock = files_by_size_by_hash.write().unwrap();
+    for (_, files_by_size) in files_by_size_by_hash_lock.iter() {
+        for (_, files) in files_by_size.iter() {
             if files.len() > 1 {
                 let mut duplicates_list = app_state
                     .find_duplicates_processing
