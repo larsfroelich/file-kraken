@@ -6,7 +6,7 @@ use crate::state::AppState;
 use crate::utils::ui_elements::{colored_box, unselectable_label};
 use crate::FileKrakenApp;
 use egui::{Color32, RichText, Ui};
-use egui_extras::{Column, TableBody, TableBuilder};
+use egui_extras::{Column, TableBody, TableBuilder, TableRow};
 use rfd::MessageDialogResult;
 use std::fmt::format;
 use std::ops::{Deref, DerefMut};
@@ -75,12 +75,12 @@ impl FileKrakenApp {
                         ui.label(format!("Eligible for deletion: {}", nr_eligible));
                         if nr_eligible > 1
                             && self
-                                .app_state
-                                .find_duplicates_processing
-                                .state
-                                .read()
-                                .unwrap()
-                                .eq(&FindDuplicatesStateType::Processed)
+                            .app_state
+                            .find_duplicates_processing
+                            .state
+                            .read()
+                            .unwrap()
+                            .eq(&FindDuplicatesStateType::Processed)
                         {
                             ui.add_space(5.0);
                             if ui.button("Delete all eligible duplicates").clicked() {
@@ -180,13 +180,20 @@ impl FileKrakenApp {
                                     ui.label(RichText::new("Location path 2").strong());
                                 });
                             })
-                            .body(|mut body| {
-                                for duplicate in eligible_duplicates
-                                    .iter()
-                                    .chain(ineligible_duplicates.iter())
-                                {
-                                    table_row(&self.app_state, &mut body, &duplicate);
-                                }
+                            .body(|body| {
+                                body.rows(
+                                    18.0,
+                                    eligible_duplicates.len() + ineligible_duplicates.len(),
+                                    |mut row| {
+                                        if let Some(duplicate) = eligible_duplicates
+                                            .iter()
+                                            .chain(ineligible_duplicates.iter())
+                                            .nth(row.index())
+                                        {
+                                            table_row(&self.app_state, &mut row, &duplicate);
+                                        }
+                                    },
+                                );
                             });
                     });
             });
@@ -194,60 +201,57 @@ impl FileKrakenApp {
     }
 }
 
-fn table_row(app_state: &Arc<AppState>, body: &mut TableBody, duplicate: &FileKrakenDuplicate) {
-    body.row(18.0, |mut row| {
-        let color = if duplicate.deletable_file.is_some() {
-            Color32::from_rgb(0, 0, 0)
-        } else {
-            Color32::from_rgb(78, 78, 78)
-        };
+fn table_row(app_state: &Arc<AppState>, row: &mut TableRow, duplicate: &FileKrakenDuplicate) {
+    let color = if duplicate.deletable_file.is_some() {
+        Color32::from_rgb(0, 0, 0)
+    } else {
+        Color32::from_rgb(78, 78, 78)
+    };
 
-        row.col(|ui| {
-            if duplicate.deletable_file.is_some() {
-                if ui.button("🗑️").clicked() {
-                    if rfd::MessageDialog::new()
-                        .set_title("Delete file?")
-                        .set_description(format!(
-                            "Are you sure you want to delete the file \"{}\"?",
-                            duplicate.deletable_file.as_ref().unwrap().path.to_string()
-                        ))
-                        .set_buttons(rfd::MessageButtons::YesNo)
-                        .show()
-                        .eq(&MessageDialogResult::Yes)
-                    {
-                        delete_duplicate(app_state, duplicate);
-                    }
+    row.col(|ui| {
+        if duplicate.deletable_file.is_some() {
+            if ui.button("🗑️").clicked() {
+                if rfd::MessageDialog::new()
+                    .set_title("Delete file?")
+                    .set_description(format!(
+                        "Are you sure you want to delete the file \"{}\"?",
+                        duplicate.deletable_file.as_ref().unwrap().path.to_string()
+                    ))
+                    .set_buttons(rfd::MessageButtons::YesNo)
+                    .show()
+                    .eq(&MessageDialogResult::Yes)
+                {
+                    delete_duplicate(app_state, duplicate);
                 }
             }
-        });
-        row.col(|ui| {
-            if duplicate.deletable_file.is_some() {
-                unselectable_label(ui, RichText::new("🆗").color(Color32::DARK_BLUE));
-            } else {
-                unselectable_label(ui, RichText::new("❌").color(Color32::DARK_RED));
-            }
-        });
-        row.col(|ui| {
+        }
+    });
+    row.col(|ui| {
+        if duplicate.deletable_file.is_some() {
+            unselectable_label(ui, RichText::new("🆗").color(Color32::DARK_BLUE));
+        } else {
+            unselectable_label(ui, RichText::new("❌").color(Color32::DARK_RED));
+        }
+    });
+    row.col(|ui| {
+        unselectable_label(
+            ui,
+            RichText::new(duplicate.other_files.get(0).unwrap().path.to_string()).color(color),
+        );
+    });
+    row.col(|ui| {
+        if let Some(deletable_file) = &duplicate.deletable_file {
             unselectable_label(
                 ui,
-                RichText::new(duplicate.other_files.get(0).unwrap().path.to_string()).color(color),
+                RichText::new(deletable_file.path.to_string())
+                    .color(color)
+                    .strikethrough(),
             );
-        });
-        row.col(|ui| {
-            if let Some(deletable_file) = &duplicate.deletable_file {
-                unselectable_label(
-                    ui,
-                    RichText::new(deletable_file.path.to_string())
-                        .color(color)
-                        .strikethrough(),
-                );
-            } else {
-                unselectable_label(
-                    ui,
-                    RichText::new(duplicate.other_files.get(1).unwrap().path.to_string())
-                        .color(color),
-                );
-            }
-        });
+        } else {
+            unselectable_label(
+                ui,
+                RichText::new(duplicate.other_files.get(1).unwrap().path.to_string()).color(color),
+            );
+        }
     });
 }
