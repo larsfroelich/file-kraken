@@ -6,10 +6,9 @@ use crate::state::AppState;
 use crate::utils::ui_elements::{colored_box, unselectable_label};
 use crate::FileKrakenApp;
 use egui::{Color32, RichText, Ui};
-use egui_extras::{Column, TableBody, TableBuilder, TableRow};
+use egui_extras::{Column, TableBuilder, TableRow};
 use rfd::MessageDialogResult;
-use std::fmt::format;
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 use std::sync::Arc;
 use std::thread;
 
@@ -75,12 +74,12 @@ impl FileKrakenApp {
                         ui.label(format!("Eligible for deletion: {}", nr_eligible));
                         if nr_eligible > 1
                             && self
-                            .app_state
-                            .find_duplicates_processing
-                            .state
-                            .read()
-                            .unwrap()
-                            .eq(&FindDuplicatesStateType::Processed)
+                                .app_state
+                                .find_duplicates_processing
+                                .state
+                                .read()
+                                .unwrap()
+                                .eq(&FindDuplicatesStateType::Processed)
                         {
                             ui.add_space(5.0);
                             if ui.button("Delete all eligible duplicates").clicked() {

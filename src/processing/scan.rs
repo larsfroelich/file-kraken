@@ -55,5 +55,27 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
             }
         }
     }
+
+    // check if files were removed
+    let files: Vec<String> = {
+        let sqlite_lock = app_state.sqlite.lock().unwrap();
+        let mut files_query = sqlite_lock
+            .as_ref()
+            .unwrap()
+            .prepare("SELECT path FROM files WHERE location_path = ?")
+            .unwrap();
+        files_query
+            .query_map(&[&location_path], |row| row.get(0))
+            .unwrap()
+            .map(|x| x.unwrap())
+            .collect()
+    };
+    for file in files {
+        // check filesystem
+        if !std::path::Path::new(&file).exists() {
+            app_state.remove_file(true, false, &file);
+        }
+    }
+
     app_state.modify_location_state(true, location_path, FileKrakenLocationState::Scanned);
 }

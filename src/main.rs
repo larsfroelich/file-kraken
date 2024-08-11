@@ -1,4 +1,7 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
+#![cfg_attr(
+    not(debug_assertions),
+    windows_subsystem = "windows"
+)] // hide console window on Windows in release
 #![allow(rustdoc::missing_crate_level_docs)] // it's an example
 
 mod app_init;
@@ -107,18 +110,16 @@ impl eframe::App for FileKrakenApp {
 
             ui.add_space(10.0);
             ui.horizontal(|ui| {
-                ui.horizontal(|ui| {
-                    ui.selectable_value(
-                        &mut self.current_tab,
-                        FileKrakenMainTabs::Locations,
-                        RichText::new("Locations"),
-                    );
-                    ui.selectable_value(
-                        &mut self.current_tab,
-                        FileKrakenMainTabs::Files,
-                        RichText::new("Files"),
-                    );
-                });
+                ui.selectable_value(
+                    &mut self.current_tab,
+                    FileKrakenMainTabs::Locations,
+                    RichText::new("Locations"),
+                );
+                ui.selectable_value(
+                    &mut self.current_tab,
+                    FileKrakenMainTabs::Files,
+                    RichText::new("Files"),
+                );
             });
             ui.separator();
             match self.current_tab {

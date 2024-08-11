@@ -5,7 +5,7 @@ use crate::utils::get_longest_parent_path;
 use crate::utils::hashing::hash_file;
 use std::collections::HashMap;
 use std::ops::DerefMut;
-use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard};
+use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard};
 
 #[derive(Default)]
 pub struct AppState {
@@ -171,29 +171,7 @@ impl AppState {
             .expect(&format!("location {} not found", location_path))
             .location_state = FileKrakenLocationState::Deleting;
 
-        if persist_to_db {
-            self.sqlite
-                .lock()
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .execute("DELETE FROM locations WHERE path = ?1", [location_path])
-                .unwrap();
-        }
-
-        let files = {
-            self.get_files_by_location(location_path)
-                .unwrap()
-                .read()
-                .unwrap()
-                .keys()
-                .map(|x| x.clone())
-                .collect::<Vec<String>>()
-        };
-
-        for file in files {
-            self.remove_file(true, false, &file);
-        }
+        self.clear_location_files(persist_to_db, location_path);
 
         self.files_by_location_by_path
             .write()
@@ -289,6 +267,24 @@ impl AppState {
         };
 
         if persist_to_db {
+            if let Some((_, existing_location)) = {
+                self.sqlite
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
+                    .query_row(
+                        "SELECT path, location_path FROM files WHERE path = ?1;",
+                        [file_path],
+                        |x| Ok((x.get::<_, String>(0)?.to_string(), x.get::<_, String>(1)?)),
+                    )
+                    .ok()
+            } {
+                if existing_location != location_path {
+                    self.remove_file(true, false, &file_path);
+                }
+            }
+
             self.sqlite
                 .lock()
                 .unwrap()

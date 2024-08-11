@@ -1,9 +1,9 @@
 use crate::processing::scan::scan_location_files;
 use crate::state::location::{FileKrakenLocationState, FileKrakenLocationType};
 use crate::state::AppState;
-use crate::utils::ui_elements::colored_box;
+use crate::utils::ui_elements::{colored_box, unselectable_label};
 use crate::FileKrakenApp;
-use egui::{Label, RichText, TextStyle, Ui, Window};
+use egui::{Label, RichText, TextStyle, Ui, Vec2, Window};
 use egui_extras::{Column, TableBody, TableBuilder};
 use rfd::FileDialog;
 use std::sync::Arc;
@@ -22,16 +22,11 @@ pub struct LocationTabState {
 
 impl FileKrakenApp {
     pub fn locations_tab(&mut self, ui: &mut Ui) {
-        ui.horizontal_centered(|ui| {
-            ui.columns(2, |cols| {
-                cols[0].with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                    left_column(self, ui)
-                });
-                cols[1].with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                    right_column(self, ui)
-                });
-            });
+        ui.columns(2, |cols| {
+            left_column(self, &mut cols[0]);
+            right_column(self, &mut cols[1]);
         });
+
         add_location_dialog_window(self, ui);
         modify_location_dialog_window(self, ui);
     }
@@ -267,45 +262,38 @@ fn add_location_dialog_window(_self: &mut FileKrakenApp, ui: &mut Ui) {
 fn left_column(_self: &mut FileKrakenApp, ui: &mut Ui) {
     let app_state = _self.app_state.clone();
 
-    ui.allocate_ui_with_layout(
-        // leave 20 vertical space for the add button
-        egui::vec2(ui.available_width(), ui.available_height() - 20.0),
-        egui::Layout::top_down(egui::Align::Min),
-        |ui| {
-            egui::Frame::none()
-                .stroke(egui::Stroke::new(1.0, egui::Color32::DARK_GRAY))
-                .outer_margin(12.0)
-                .inner_margin(6.0)
-                .show(ui, |ui| {
-                    TableBuilder::new(ui)
-                        .sense(egui::Sense::click())
-                        .column(Column::auto())
-                        .column(Column::auto())
-                        .column(Column::remainder())
-                        .cell_layout(egui::Layout::top_down_justified(egui::Align::LEFT))
-                        .header(25.0, |mut row| {
-                            row.col(|ui| {
-                                ui.label(RichText::new(" ").strong());
-                            });
-                            row.col(|ui| {
-                                ui.label(RichText::new("Location path").strong());
-                            });
-                        })
-                        .body(|mut body| {
-                            for location in app_state.get_locations_list_readonly().iter() {
-                                table_row(
-                                    &app_state,
-                                    &mut body,
-                                    &location.path,
-                                    &location.location_type,
-                                    &location.location_state,
-                                    &mut _self.tab_state_locations.selected_location,
-                                );
-                            }
-                        });
+    egui::Frame::none()
+        .stroke(egui::Stroke::new(1.0, egui::Color32::DARK_GRAY))
+        .outer_margin(12.0)
+        .inner_margin(6.0)
+        .show(ui, |ui| {
+            let available_width = ui.available_width();
+            TableBuilder::new(ui)
+                .sense(egui::Sense::click())
+                .column(Column::exact(16.0))
+                .column(Column::exact(20.0))
+                .column(Column::exact(available_width - 36.0))
+                .cell_layout(egui::Layout::top_down_justified(egui::Align::LEFT))
+                .header(25.0, |mut row| {
+                    row.col(|_| {});
+                    row.col(|_| {});
+                    row.col(|ui| {
+                        ui.label(RichText::new("Location path").strong());
+                    });
+                })
+                .body(|mut body| {
+                    for location in app_state.get_locations_list_readonly().iter() {
+                        table_row(
+                            &app_state,
+                            &mut body,
+                            &location.path,
+                            &location.location_type,
+                            &location.location_state,
+                            &mut _self.tab_state_locations.selected_location,
+                        );
+                    }
                 });
-        },
-    );
+        });
     ui.vertical_centered_justified(|ui| {
         ui.button("➕ add location").clicked().then(|| {
             _self.tab_state_locations.add_location_dialog_open = true;
@@ -358,23 +346,13 @@ fn table_row(
             _ => {}
         });
         row.col(|ui| {
+            let mut label_text = RichText::new(path).text_style(TextStyle::Monospace);
             if location_type == &FileKrakenLocationType::Excluded
                 || location_state == &FileKrakenLocationState::Deleting
             {
-                ui.add(Label::selectable(
-                    Label::new(
-                        RichText::new(path)
-                            .text_style(TextStyle::Monospace)
-                            .strikethrough(),
-                    ),
-                    false,
-                ));
-            } else {
-                ui.add(Label::selectable(
-                    Label::new(RichText::new(path).text_style(TextStyle::Monospace)),
-                    false,
-                ));
+                label_text = label_text.strikethrough();
             }
+            unselectable_label(ui, label_text);
         })
         .1
         .clicked()

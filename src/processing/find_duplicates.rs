@@ -23,6 +23,22 @@ pub enum FindDuplicatesStateType {
 }
 
 pub fn find_file_duplicates(app_state: Arc<AppState>) {
+    if run_find_file_duplicates(app_state.clone()).is_none() {
+        rfd::MessageDialog::new()
+            .set_title("Failed to find duplicates")
+            .set_description("Failed to find duplicates")
+            .show();
+        app_state
+            .find_duplicates_processing
+            .duplicates
+            .write()
+            .expect("Failed to clear duplicates")
+            .clear();
+        *get_duplicates_processing_state(&app_state).deref_mut() = FindDuplicatesStateType::None;
+    }
+}
+
+pub fn run_find_file_duplicates(app_state: Arc<AppState>) -> Option<()> {
     if let FindDuplicatesStateType::Processing(_) =
         get_duplicates_processing_state(&app_state).deref_mut()
     {
@@ -30,18 +46,17 @@ pub fn find_file_duplicates(app_state: Arc<AppState>) {
             .set_title("Already processing")
             .set_description("Already processing duplicates")
             .show();
-        return;
+        return Some(());
     }
     app_state
         .find_duplicates_processing
         .duplicates
         .write()
-        .unwrap()
+        .ok()?
         .clear();
 
     set_processing_message(&app_state, "Scanning for file size matches...");
-    let mut duplicate_file_sizes =
-        find_duplicate_file_sizes(&app_state.sqlite).expect("Failed to get duplicate file sizes");
+    let mut duplicate_file_sizes = find_duplicate_file_sizes(&app_state.sqlite)?;
 
     let files_by_size_by_hash = Arc::new(RwLock::new(HashMap::default()));
     let mut duplicates_search_by_filesize_threads = vec![];
@@ -98,26 +113,26 @@ pub fn find_file_duplicates(app_state: Arc<AppState>) {
                     }));
                 }
                 for thread in threads {
-                    thread.join().unwrap();
+                    thread.join().expect("Failed to join hashing thread");
                 }
                 *sizes_checked_so_far.write().unwrap() += 1.0;
             }
         }));
     }
     for thread in duplicates_search_by_filesize_threads {
-        thread.join().unwrap();
+        thread.join().ok()?;
     }
 
     set_processing_message(&app_state, "Checking file-hashes for duplicates...");
-    let files_by_size_by_hash_lock = files_by_size_by_hash.write().unwrap();
+    let files_by_size_by_hash_lock = files_by_size_by_hash.write().ok()?;
     for (_, files_by_size) in files_by_size_by_hash_lock.iter() {
-        for (_, files) in files_by_size.read().unwrap().iter() {
+        for (_, files) in files_by_size.read().ok()?.iter() {
             if files.len() > 1 {
                 let mut duplicates_list = app_state
                     .find_duplicates_processing
                     .duplicates
                     .write()
-                    .unwrap();
+                    .ok()?;
 
                 let deletable_file = get_deletable_file(&app_state, &files);
                 let other_files = if deletable_file.is_some() {
@@ -139,6 +154,8 @@ pub fn find_file_duplicates(app_state: Arc<AppState>) {
     }
 
     *get_duplicates_processing_state(&app_state).deref_mut() = FindDuplicatesStateType::Processed;
+
+    Some(())
 }
 
 fn get_deletable_file(
@@ -164,7 +181,7 @@ fn get_deletable_file(
             file_locations
                 .iter()
                 .filter(|(_, location)| location.is_some())
-                .find(|(file, location)| {
+                .find(|(_, location)| {
                     location
                         .as_ref()
                         .is_some_and(|loc| loc.location_type == FileKrakenLocationType::Preferred)
@@ -173,7 +190,7 @@ fn get_deletable_file(
             file_locations
                 .iter()
                 .filter(|(_, location)| location.is_some())
-                .find(|(file, location)| {
+                .find(|(_, location)| {
                     location
                         .as_ref()
                         .is_some_and(|loc| loc.location_type == FileKrakenLocationType::Normal)
