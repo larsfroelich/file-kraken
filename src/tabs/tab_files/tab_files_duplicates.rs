@@ -74,12 +74,12 @@ impl FileKrakenApp {
                         ui.label(format!("Eligible for deletion: {}", nr_eligible));
                         if nr_eligible > 1
                             && self
-                                .app_state
-                                .find_duplicates_processing
-                                .state
-                                .read()
-                                .unwrap()
-                                .eq(&FindDuplicatesStateType::Processed)
+                            .app_state
+                            .find_duplicates_processing
+                            .state
+                            .read()
+                            .unwrap()
+                            .eq(&FindDuplicatesStateType::Processed)
                         {
                             ui.add_space(5.0);
                             if ui.button("Delete all eligible duplicates").clicked() {
@@ -101,7 +101,7 @@ impl FileKrakenApp {
                                         .clone();
                                     let _app_state = self.app_state.clone();
                                     thread::spawn(move || {
-                                        let total_nr_duplicates = _duplicates.len();
+                                        let total_nr_eligible = nr_eligible;
                                         let mut nr_deleted = 0;
                                         for duplicate in _duplicates.iter() {
                                             {
@@ -111,8 +111,9 @@ impl FileKrakenApp {
                                                     .write()
                                                     .unwrap() =
                                                     FindDuplicatesStateType::Processing(format!(
-                                                        "Deleting eligible duplicates ... ({}/{})",
-                                                        nr_deleted, total_nr_duplicates
+                                                        "Deleting eligible duplicates ... {:.2}% ({}/{})",
+                                                        (nr_deleted as f64 / total_nr_eligible as f64) * 100.0,
+                                                        nr_deleted, total_nr_eligible
                                                     ));
                                             }
                                             if let Some(_) = &duplicate.deletable_file {
