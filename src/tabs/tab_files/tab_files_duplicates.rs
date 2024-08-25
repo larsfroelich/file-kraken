@@ -1,5 +1,6 @@
 use crate::processing::find_duplicates::{
-    delete_duplicate, find_file_duplicates, FindDuplicatesStateType,
+    delete_duplicate, find_file_duplicates, get_duplicates_processing_state,
+    set_processing_message, FindDuplicatesStateType,
 };
 use crate::state::duplicate::FileKrakenDuplicate;
 use crate::state::AppState;
@@ -8,7 +9,7 @@ use crate::FileKrakenApp;
 use egui::{Color32, RichText, Ui};
 use egui_extras::{Column, TableBuilder, TableRow};
 use rfd::MessageDialogResult;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::thread;
 
@@ -92,7 +93,6 @@ impl FileKrakenApp {
                                     .show()
                                     .eq(&MessageDialogResult::Yes)
                                 {
-                                    FindDuplicatesStateType::Processing("Deleting eligible duplicates ... ".to_string());
                                     let _duplicates = self
                                         .app_state
                                         .find_duplicates_processing
@@ -104,29 +104,25 @@ impl FileKrakenApp {
                                     let total_nr_eligible = nr_eligible;
                                     thread::spawn(move || {
                                         let mut nr_deleted = 0;
+                                        set_processing_message(&_app_state, format!(
+                                            "Deleting eligible duplicates ... {:.2}% ({}/{})",
+                                            (nr_deleted as f64 / total_nr_eligible as f64) * 100.0,
+                                            nr_deleted, total_nr_eligible
+                                        ));
                                         for duplicate in _duplicates.iter() {
-                                            {
-                                                *_app_state
-                                                    .find_duplicates_processing
-                                                    .state
-                                                    .write()
-                                                    .unwrap() =
-                                                    FindDuplicatesStateType::Processing(format!(
-                                                        "Deleting eligible duplicates ... {:.2}% ({}/{})",
-                                                        (nr_deleted as f64 / total_nr_eligible as f64) * 100.0,
-                                                        nr_deleted, total_nr_eligible
-                                                    ));
-                                            }
-                                            if let Some(_) = &duplicate.deletable_file {
+                                            if duplicate.deletable_file.is_some() {
+                                                set_processing_message(&_app_state, format!(
+                                                    "Deleting eligible duplicates ... {:.2}% ({}/{})",
+                                                    (nr_deleted as f64 / total_nr_eligible as f64) * 100.0,
+                                                    nr_deleted, total_nr_eligible
+                                                ));
                                                 delete_duplicate(&_app_state, duplicate);
+                                                nr_deleted += 1;
                                             }
-                                            nr_deleted += 1;
                                         }
-                                        *_app_state
-                                            .find_duplicates_processing
-                                            .state
-                                            .write()
-                                            .unwrap() = FindDuplicatesStateType::Processed;
+                                        *get_duplicates_processing_state(&_app_state)
+                                            .deref_mut()
+                                            = FindDuplicatesStateType::Processed;
                                     });
                                 }
                             }

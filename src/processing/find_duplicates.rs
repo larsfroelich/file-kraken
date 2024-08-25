@@ -55,7 +55,7 @@ pub fn run_find_file_duplicates(app_state: Arc<AppState>) -> Option<()> {
         .ok()?
         .clear();
 
-    set_processing_message(&app_state, "Scanning for file size matches...");
+    set_processing_message(&app_state, "Scanning for file size matches...".to_string());
     let mut duplicate_file_sizes = find_duplicate_file_sizes(&app_state.sqlite)?;
 
     let files_by_size_by_hash = Arc::new(RwLock::new(HashMap::default()));
@@ -79,7 +79,7 @@ pub fn run_find_file_duplicates(app_state: Arc<AppState>) -> Option<()> {
                 let nr_files_by_size = files_by_size.len();
                 set_processing_message(
                     &app_state,
-                    &format!(
+                    format!(
                         "{:.2}% | Calculating hashes for {} files of size {}",
                         sizes_checked_so_far.read().unwrap().clone() * 100.0
                             / nr_total_sizes_to_check,
@@ -123,7 +123,10 @@ pub fn run_find_file_duplicates(app_state: Arc<AppState>) -> Option<()> {
         thread.join().ok()?;
     }
 
-    set_processing_message(&app_state, "Checking file-hashes for duplicates...");
+    set_processing_message(
+        &app_state,
+        "Checking file-hashes for duplicates...".to_string(),
+    );
     let files_by_size_by_hash_lock = files_by_size_by_hash.write().ok()?;
     for (_, files_by_size) in files_by_size_by_hash_lock.iter() {
         for (_, files) in files_by_size.read().ok()?.iter() {
@@ -244,15 +247,15 @@ fn get_files_by_size(app_state: &Arc<AppState>, size: u64) -> Option<Vec<FileKra
     Some(files)
 }
 
-fn get_duplicates_processing_state(
+pub fn get_duplicates_processing_state(
     app_state: &Arc<AppState>,
 ) -> RwLockWriteGuard<'_, FindDuplicatesStateType> {
     app_state.find_duplicates_processing.state.write().unwrap()
 }
 
-fn set_processing_message(app_state: &Arc<AppState>, message: &str) {
+pub fn set_processing_message(app_state: &Arc<AppState>, message: String) {
     *get_duplicates_processing_state(app_state).deref_mut() =
-        FindDuplicatesStateType::Processing(message.to_string());
+        FindDuplicatesStateType::Processing(message);
 }
 
 fn find_duplicate_file_sizes(
