@@ -92,6 +92,7 @@ impl FileKrakenApp {
                                     .show()
                                     .eq(&MessageDialogResult::Yes)
                                 {
+                                    FindDuplicatesStateType::Processing("Deleting eligible duplicates ... ".to_string());
                                     let _duplicates = self
                                         .app_state
                                         .find_duplicates_processing
@@ -100,8 +101,8 @@ impl FileKrakenApp {
                                         .unwrap()
                                         .clone();
                                     let _app_state = self.app_state.clone();
+                                    let total_nr_eligible = nr_eligible;
                                     thread::spawn(move || {
-                                        let total_nr_eligible = nr_eligible;
                                         let mut nr_deleted = 0;
                                         for duplicate in _duplicates.iter() {
                                             {

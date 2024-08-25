@@ -1410,7 +1410,7 @@ dependencies = [
 
 [[package]]
 name = "file-kraken"
-version = "1.0.9"
+version = "1.0.10"
 dependencies = [
  "catppuccin-egui",
  "eframe",
