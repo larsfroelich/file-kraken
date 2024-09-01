@@ -5,7 +5,7 @@ Simple GUI application for managing large sets of files.
 Helps you find duplicates, empty folders, large files and more.
 
 ## Features
-> WARNING - This is a work in progress. The following features are planned, but not yet implemented.
+> WARNING - This is a work in progress. Use at your own risk.
 - add locations to search for files
 - scan the locations for files
 - find duplicates using hashing on file-size matches
