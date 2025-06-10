@@ -1,4 +1,5 @@
 use crate::state::file::FileKrakenFile;
+use std::fmt;
 
 #[derive(Default, Debug, Clone)]
 pub struct FileKrakenDuplicate {
@@ -12,4 +13,12 @@ pub struct FileKrakenDuplicate {
 pub enum FileKrakenDuplicateType {
     #[default]
     ExactMatch,
+}
+
+impl fmt::Display for FileKrakenDuplicateType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FileKrakenDuplicateType::ExactMatch => write!(f, "Exact"),
+        }
+    }
 }

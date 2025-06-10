@@ -155,13 +155,16 @@ impl FileKrakenApp {
                     .outer_margin(12.0)
                     .inner_margin(6.0)
                     .show(ui, |ui| {
-                        let available_width = ui.available_width();
                         TableBuilder::new(ui)
                             .sense(egui::Sense::click())
                             .column(Column::exact(25.0))
                             .column(Column::exact(15.0))
-                            .column(Column::exact(available_width / 2.0 - 40.0))
-                            .column(Column::exact(available_width / 2.0 - 40.0))
+                            .column(Column::remainder())
+                            .column(Column::remainder())
+                            .column(Column::auto())
+                            .column(Column::auto())
+                            .column(Column::auto())
+                            .column(Column::auto())
                             .cell_layout(egui::Layout::top_down_justified(egui::Align::LEFT))
                             .header(25.0, |mut row| {
                                 row.col(|ui| {
@@ -175,6 +178,18 @@ impl FileKrakenApp {
                                 });
                                 row.col(|ui| {
                                     ui.label(RichText::new("Location path 2").strong());
+                                });
+                                row.col(|ui| {
+                                    ui.label(RichText::new("Type").strong());
+                                });
+                                row.col(|ui| {
+                                    ui.label(RichText::new("Size").strong());
+                                });
+                                row.col(|ui| {
+                                    ui.label(RichText::new("Created").strong());
+                                });
+                                row.col(|ui| {
+                                    ui.label(RichText::new("Modified").strong());
                                 });
                             })
                             .body(|body| {
@@ -250,5 +265,34 @@ fn table_row(app_state: &Arc<AppState>, row: &mut TableRow, duplicate: &FileKrak
                 RichText::new(duplicate.other_files.get(1).unwrap().path.to_string()).color(color),
             );
         }
+    });
+    let metadata_file = duplicate
+        .deletable_file
+        .as_ref()
+        .or_else(|| duplicate.other_files.get(0))
+        .unwrap();
+    row.col(|ui| {
+        unselectable_label(
+            ui,
+            RichText::new(duplicate.duplicate_type.to_string()).color(color),
+        );
+    });
+    row.col(|ui| {
+        unselectable_label(
+            ui,
+            RichText::new(metadata_file.file_len.to_string()).color(color),
+        );
+    });
+    row.col(|ui| {
+        unselectable_label(
+            ui,
+            RichText::new(metadata_file.time_created.to_string()).color(color),
+        );
+    });
+    row.col(|ui| {
+        unselectable_label(
+            ui,
+            RichText::new(metadata_file.time_modified.to_string()).color(color),
+        );
     });
 }
