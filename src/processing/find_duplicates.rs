@@ -165,11 +165,22 @@ pub fn run_find_file_duplicates(app_state: Arc<AppState>) -> Option<()> {
                 } else {
                     files.clone()
                 };
-                duplicates_list.push(FileKrakenDuplicate {
+                let duplicate = FileKrakenDuplicate {
                     other_files,
                     deletable_file,
                     duplicate_type: FileKrakenDuplicateType::ExactMatch,
-                });
+                };
+                log::trace!(
+                    "found duplicate type {:?} size {}",
+                    duplicate.duplicate_type,
+                    duplicate
+                        .deletable_file
+                        .as_ref()
+                        .or_else(|| duplicate.other_files.get(0))
+                        .map(|f| f.file_len)
+                        .unwrap_or(0)
+                );
+                duplicates_list.push(duplicate);
             }
         }
     }

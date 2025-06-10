@@ -277,6 +277,13 @@ impl AppState {
             time_modified,
             hash,
         };
+        log::trace!(
+            "adding file {:?} len {} created {} modified {}",
+            file.file_type,
+            file.file_len,
+            file.time_created,
+            file.time_modified
+        );
 
         if persist_to_db {
             if let Some((_, existing_location)) = {
