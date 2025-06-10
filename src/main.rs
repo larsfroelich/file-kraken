@@ -68,7 +68,11 @@ impl eframe::App for FileKrakenApp {
                                     .pick_file();
 
                                 if let Some(file) = maybe_file {
-                                    try_connect_sqlite(self, file.to_str().unwrap());
+                                    if let Some(path) = file.to_str() {
+                                        try_connect_sqlite(self, path);
+                                    } else {
+                                        error_dialog("Invalid project path");
+                                    }
                                 }
                             }
                             ui.add_space(8.0);
@@ -80,7 +84,11 @@ impl eframe::App for FileKrakenApp {
                                     if !file.ends_with(".fkrproj") {
                                         file.set_extension("fkrproj");
                                     }
-                                    try_connect_sqlite(self, file.to_str().unwrap());
+                                    if let Some(path) = file.to_str() {
+                                        try_connect_sqlite(self, path);
+                                    } else {
+                                        error_dialog("Invalid project path");
+                                    }
                                 }
                             }
                         });

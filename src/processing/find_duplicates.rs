@@ -3,10 +3,11 @@ use crate::state::file::{FileKrakenFile, FileKrakenFileType};
 use crate::state::location::{FileKrakenLocation, FileKrakenLocationType};
 use crate::state::AppState;
 use crate::utils::get_longest_parent_path;
+use crate::utils::locks::{lock_rw_read_or_exit, lock_rw_write_or_exit};
 use egui::ahash::HashMap;
 use std::cmp::max;
 use std::ops::DerefMut;
-use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
+use std::sync::{Arc, RwLock, RwLockWriteGuard};
 
 #[derive(Default)]
 pub struct FindDuplicatesState {
@@ -48,15 +49,16 @@ pub fn run_find_file_duplicates(app_state: Arc<AppState>) -> Option<()> {
             .show();
         return Some(());
     }
-    app_state
-        .find_duplicates_processing
-        .duplicates
-        .write()
-        .ok()?
-        .clear();
+    if let Some(mut dups) =
+        lock_rw_write_or_exit(&app_state.find_duplicates_processing.duplicates, &app_state)
+    {
+        dups.clear();
+    } else {
+        return None;
+    }
 
     set_processing_message(&app_state, "Scanning for file size matches...".to_string());
-    let mut duplicate_file_sizes = find_duplicate_file_sizes(&app_state.sqlite)?;
+    let mut duplicate_file_sizes = find_duplicate_file_sizes(&app_state)?;
 
     let files_by_size_by_hash = Arc::new(RwLock::new(HashMap::default()));
     let mut duplicates_search_by_filesize_threads = vec![];
@@ -74,8 +76,10 @@ pub fn run_find_file_duplicates(app_state: Arc<AppState>) -> Option<()> {
         let sizes_checked_so_far = sizes_checked_so_far.clone();
         duplicates_search_by_filesize_threads.push(std::thread::spawn(move || {
             for duplicate_file_size in duplicate_file_size_chunk {
-                let mut files_by_size: Vec<FileKrakenFile> =
-                    get_files_by_size(&app_state, duplicate_file_size).unwrap();
+                let Some(mut files_by_size) = get_files_by_size(&app_state, duplicate_file_size)
+                else {
+                    continue;
+                };
                 let nr_files_by_size = files_by_size.len();
                 set_processing_message(
                     &app_state,
@@ -101,19 +105,22 @@ pub fn run_find_file_duplicates(app_state: Arc<AppState>) -> Option<()> {
                     let _app_state = app_state.clone();
                     threads.push(std::thread::spawn(move || {
                         for mut file in files {
-                            // calc hash
-                            file.hash = Some(_app_state.calculate_file_hash(&file.path));
-                            files_by_size_by_hash
-                                .write()
-                                .unwrap()
-                                .entry(file.hash.clone().unwrap())
-                                .or_insert(vec![])
-                                .push(file.clone());
+                            if let Some(hash) = _app_state.calculate_file_hash(&file.path) {
+                                file.hash = Some(hash.clone());
+                                files_by_size_by_hash
+                                    .write()
+                                    .unwrap()
+                                    .entry(hash)
+                                    .or_insert(vec![])
+                                    .push(file.clone());
+                            }
                         }
                     }));
                 }
                 for thread in threads {
-                    thread.join().expect("Failed to join hashing thread");
+                    if let Err(err) = thread.join() {
+                        log::error!("Hashing thread panicked: {:?}", err);
+                    }
                 }
                 *sizes_checked_so_far.write().unwrap() += 1.0;
             }
@@ -127,21 +134,32 @@ pub fn run_find_file_duplicates(app_state: Arc<AppState>) -> Option<()> {
         &app_state,
         "Checking file-hashes for duplicates...".to_string(),
     );
-    let files_by_size_by_hash_lock = files_by_size_by_hash.write().ok()?;
+    let files_by_size_by_hash_lock = match lock_rw_write_or_exit(&files_by_size_by_hash, &app_state)
+    {
+        Some(lock) => lock,
+        None => return None,
+    };
     for (_, files_by_size) in files_by_size_by_hash_lock.iter() {
-        for (_, files) in files_by_size.read().ok()?.iter() {
+        for (_, files) in match lock_rw_read_or_exit(files_by_size, &app_state) {
+            Some(l) => l,
+            None => return None,
+        }
+        .iter()
+        {
             if files.len() > 1 {
-                let mut duplicates_list = app_state
-                    .find_duplicates_processing
-                    .duplicates
-                    .write()
-                    .ok()?;
+                let mut duplicates_list = match lock_rw_write_or_exit(
+                    &app_state.find_duplicates_processing.duplicates,
+                    &app_state,
+                ) {
+                    Some(lock) => lock,
+                    None => return None,
+                };
 
                 let deletable_file = get_deletable_file(&app_state, &files);
-                let other_files = if deletable_file.is_some() {
+                let other_files = if let Some(ref deletable) = deletable_file {
                     files
                         .iter()
-                        .filter(|x| x.path != deletable_file.as_ref().unwrap().path)
+                        .filter(|x| x.path != deletable.path)
                         .cloned()
                         .collect()
                 } else {
@@ -174,7 +192,7 @@ fn get_deletable_file(
                     (
                         file.clone(),
                         get_longest_parent_path(&file.path, locations.iter())
-                            .map(|x| locations.iter().find(|loc| loc.path == x).unwrap().clone()),
+                            .and_then(|p| locations.iter().find(|loc| loc.path == p).cloned()),
                     )
                 })
                 .collect()
@@ -210,41 +228,35 @@ fn get_deletable_file(
 }
 
 fn get_files_by_size(app_state: &Arc<AppState>, size: u64) -> Option<Vec<FileKrakenFile>> {
-    let sqlite_lock = app_state.sqlite.lock().unwrap();
-    let mut files = vec![];
-
-    let mut sqlite_query = sqlite_lock
-        .as_ref()?
-        .prepare(
+    app_state.with_sqlite_conn(|conn| {
+        let mut stmt = conn.prepare(
             "SELECT \
         path, file_type, file_len, time_created, time_modified, hash_256 \
         FROM files \
         WHERE file_len = ?1",
-        )
-        .unwrap();
-    let mut select_files = sqlite_query.query([size]).ok()?;
-
-    while let Some(row) = select_files.next().ok()? {
-        let file_path: String = row.get(0).ok()?;
-        let file_type = match row.get::<usize, String>(1).ok()?.as_str() {
-            "normal" => FileKrakenFileType::Normal,
-            "archive" => FileKrakenFileType::Archive,
-            x => {
-                panic!("unknown file type {}", x)
-            }
-        };
-
-        files.push(FileKrakenFile {
-            path: file_path,
-            file_type,
-            file_len: row.get(2).ok()?,
-            time_created: row.get(3).ok()?,
-            time_modified: row.get(4).ok()?,
-            hash: row.get(5).ok()?,
-        });
-    }
-
-    Some(files)
+        )?;
+        let mut select_files = stmt.query([size])?;
+        let mut files = vec![];
+        while let Some(row) = select_files.next()? {
+            let file_path: String = row.get(0)?;
+            let file_type = match row.get::<usize, String>(1)?.as_str() {
+                "normal" => FileKrakenFileType::Normal,
+                "archive" => FileKrakenFileType::Archive,
+                x => {
+                    panic!("unknown file type {}", x)
+                }
+            };
+            files.push(FileKrakenFile {
+                path: file_path,
+                file_type,
+                file_len: row.get(2)?,
+                time_created: row.get(3)?,
+                time_modified: row.get(4)?,
+                hash: row.get(5)?,
+            });
+        }
+        Ok(files)
+    })
 }
 
 pub fn get_duplicates_processing_state(
@@ -258,23 +270,17 @@ pub fn set_processing_message(app_state: &Arc<AppState>, message: String) {
         FindDuplicatesStateType::Processing(message);
 }
 
-fn find_duplicate_file_sizes(
-    sqlite: &Arc<Mutex<Option<rusqlite::Connection>>>,
-) -> Option<Vec<u64>> {
-    let sqlite_lock = sqlite.lock().unwrap();
-    let mut find_duplicate_file_sizes = sqlite_lock
-        .as_ref()
-        .unwrap()
-        .prepare("SELECT file_len, COUNT(*) c FROM files f GROUP BY file_len HAVING c > 1")
-        .ok()?;
-    let mut find_duplicate_file_sizes_query = find_duplicate_file_sizes.query([]).ok()?;
-
-    let mut duplicate_file_sizes = vec![];
-    while let Some(row) = find_duplicate_file_sizes_query.next().ok()? {
-        duplicate_file_sizes.push(row.get(0).ok()?);
-    }
-
-    Some(duplicate_file_sizes)
+fn find_duplicate_file_sizes(app_state: &Arc<AppState>) -> Option<Vec<u64>> {
+    app_state.with_sqlite_conn(|conn| {
+        let mut stmt = conn
+            .prepare("SELECT file_len, COUNT(*) c FROM files f GROUP BY file_len HAVING c > 1")?;
+        let mut query = stmt.query([])?;
+        let mut sizes = vec![];
+        while let Some(row) = query.next()? {
+            sizes.push(row.get(0)?);
+        }
+        Ok(sizes)
+    })
 }
 
 pub fn delete_duplicate(app_state: &Arc<AppState>, duplicate: &FileKrakenDuplicate) {
@@ -286,14 +292,19 @@ pub fn delete_duplicate(app_state: &Arc<AppState>, duplicate: &FileKrakenDuplica
             .read()
             .unwrap();
 
-        duplicates_list
-            .iter()
-            .position(|x| {
-                x.deletable_file.as_ref().is_some_and(|file| {
-                    file.path == duplicate.deletable_file.as_ref().unwrap().path
-                })
+        match duplicates_list.iter().position(|x| {
+            x.deletable_file.as_ref().is_some_and(|file| {
+                duplicate
+                    .deletable_file
+                    .as_ref()
+                    .map(|d| d.path.as_str())
+                    .unwrap_or("")
+                    == file.path
             })
-            .unwrap()
+        }) {
+            Some(index) => index,
+            None => return,
+        }
     };
     {
         app_state
@@ -304,5 +315,7 @@ pub fn delete_duplicate(app_state: &Arc<AppState>, duplicate: &FileKrakenDuplica
             .remove(duplicate_index);
     }
 
-    app_state.remove_file(true, true, &duplicate.deletable_file.as_ref().unwrap().path);
+    if let Some(file) = duplicate.deletable_file.as_ref() {
+        app_state.remove_file(true, true, &file.path);
+    }
 }

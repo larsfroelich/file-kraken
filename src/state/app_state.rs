@@ -1,6 +1,7 @@
-use crate::processing::find_duplicates::FindDuplicatesState;
+use crate::processing::find_duplicates::{FindDuplicatesState, FindDuplicatesStateType};
 use crate::state::file::{FileKrakenFile, FileKrakenFileType};
 use crate::state::location::{FileKrakenLocation, FileKrakenLocationState, FileKrakenLocationType};
+use crate::utils::dialogs::error_dialog;
 use crate::utils::get_longest_parent_path;
 use crate::utils::hashing::hash_file;
 use std::collections::HashMap;
@@ -120,41 +121,74 @@ impl AppState {
         Ok(())
     }
 
-    pub fn calculate_file_hash(&self, file_path: &str) -> String {
+    /// Acquire the SQLite connection mutex or exit the project on failure.
+    pub fn sqlite_lock_or_exit(
+        &self,
+    ) -> Option<std::sync::MutexGuard<'_, Option<rusqlite::Connection>>> {
+        match self.sqlite.lock() {
+            Ok(g) => Some(g),
+            Err(_) => {
+                error_dialog("Internal error: database lock poisoned. Closing project.");
+                self.close_project();
+                None
+            }
+        }
+    }
+
+    /// Execute a closure with a reference to the SQLite connection. If any
+    /// error occurs while accessing the connection or running the closure, the
+    /// project is closed and `None` is returned.
+    pub fn with_sqlite_conn<F, T>(&self, func: F) -> Option<T>
+    where
+        F: FnOnce(&rusqlite::Connection) -> rusqlite::Result<T>,
+    {
+        let guard = self.sqlite_lock_or_exit()?;
+        let conn = match guard.as_ref() {
+            Some(c) => c,
+            None => {
+                error_dialog("Internal error: database connection missing. Closing project.");
+                self.close_project();
+                return None;
+            }
+        };
+        match func(conn) {
+            Ok(val) => Some(val),
+            Err(err) => {
+                error_dialog(&format!("Database error: {err}. Closing project."));
+                self.close_project();
+                None
+            }
+        }
+    }
+
+    pub fn calculate_file_hash(&self, file_path: &str) -> Option<String> {
         // get file to check if its already hashed
-        let hash: String = self
-            .sqlite
-            .lock()
-            .unwrap()
-            .as_ref()
-            .expect("sqlite connection not set")
-            .query_row(
+        let hash: String = self.with_sqlite_conn(|conn| {
+            conn.query_row(
                 "SELECT hash_256 FROM files WHERE path = ?1;",
                 [file_path],
                 |x| x.get(0),
             )
-            .unwrap();
+        })?;
 
-        match hash.as_str() {
-            "NULL" => {
-                // calculate hash
-                let hash = hash_file(&file_path);
-
-                // update hash in sqlite
-                self.sqlite
-                    .lock()
-                    .unwrap()
-                    .as_ref()
-                    .expect("sqlite connection not set")
-                    .execute(
-                        "UPDATE files SET hash_256 = ?1 WHERE path = ?2;",
-                        [&hash, file_path],
-                    )
-                    .unwrap();
-
-                hash
+        if hash == "NULL" {
+            match hash_file(file_path) {
+                Ok(hash) => {
+                    let _ = self.with_sqlite_conn(|conn| {
+                        conn.execute(
+                            "UPDATE files SET hash_256 = ?1 WHERE path = ?2;",
+                            [&hash, file_path],
+                        )
+                    });
+                    Some(hash)
+                }
+                Err(err) => {
+                    error_dialog(&format!("Failed to hash file {file_path}: {err}"));
+                    None
+                }
             }
-            x => x.to_string(),
+        } else {
+            Some(hash)
         }
     }
 
@@ -520,5 +554,24 @@ impl AppState {
             .get(location)
             // clone the Arc reference of the Hashmap if it exists
             .map(|x| x.clone())
+    }
+
+    /// Close the currently open project and clear all in-memory state.
+    pub fn close_project(&self) {
+        if let Ok(mut sqlite) = self.sqlite.lock() {
+            *sqlite = None;
+        }
+        if let Ok(mut locations) = self.locations_list.write() {
+            locations.clear();
+        }
+        if let Ok(mut files) = self.files_by_location_by_path.write() {
+            files.clear();
+        }
+        if let Ok(mut dups) = self.find_duplicates_processing.duplicates.write() {
+            dups.clear();
+        }
+        if let Ok(mut state) = self.find_duplicates_processing.state.write() {
+            *state = FindDuplicatesStateType::None;
+        }
     }
 }
