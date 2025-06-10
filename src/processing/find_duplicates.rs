@@ -8,6 +8,9 @@ use std::cmp::max;
 use std::ops::DerefMut;
 use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
 
+type FilesByHash = HashMap<String, Vec<FileKrakenFile>>;
+type FilesBySizeByHash = HashMap<u64, FilesByHash>;
+
 #[derive(Default)]
 pub struct FindDuplicatesState {
     pub duplicates: RwLock<Vec<FileKrakenDuplicate>>,
@@ -28,12 +31,7 @@ pub fn find_file_duplicates(app_state: Arc<AppState>) {
             .set_title("Failed to find duplicates")
             .set_description("Failed to find duplicates")
             .show();
-        app_state
-            .find_duplicates_processing
-            .duplicates
-            .write()
-            .expect("Failed to clear duplicates")
-            .clear();
+        clear_previous_duplicates(&app_state);
         *get_duplicates_processing_state(&app_state).deref_mut() = FindDuplicatesStateType::None;
     }
 }
@@ -48,34 +46,53 @@ pub fn run_find_file_duplicates(app_state: Arc<AppState>) -> Option<()> {
             .show();
         return Some(());
     }
+
+    clear_previous_duplicates(&app_state)?;
+    set_processing_message(&app_state, "Scanning for file size matches...".to_string());
+
+    let duplicate_file_sizes = find_duplicate_file_sizes(&app_state.sqlite)?;
+    let files_by_size_by_hash = hash_duplicate_files(&app_state, duplicate_file_sizes)?;
+
+    detect_duplicates(&app_state, &files_by_size_by_hash)?;
+
+    *get_duplicates_processing_state(&app_state).deref_mut() = FindDuplicatesStateType::Processed;
+    Some(())
+}
+
+/// Remove any previously found duplicates from the state.
+fn clear_previous_duplicates(app_state: &Arc<AppState>) -> Option<()> {
     app_state
         .find_duplicates_processing
         .duplicates
         .write()
         .ok()?
         .clear();
+    Some(())
+}
 
-    set_processing_message(&app_state, "Scanning for file size matches...".to_string());
-    let mut duplicate_file_sizes = find_duplicate_file_sizes(&app_state.sqlite)?;
-
-    let files_by_size_by_hash = Arc::new(RwLock::new(HashMap::default()));
-    let mut duplicates_search_by_filesize_threads = vec![];
+/// Calculate hashes for potential duplicates and bucket them by size and hash.
+fn hash_duplicate_files(
+    app_state: &Arc<AppState>,
+    duplicate_file_sizes: Vec<u64>,
+) -> Option<FilesBySizeByHash> {
+    let files_by_size_by_hash: Arc<RwLock<HashMap<u64, Arc<RwLock<FilesByHash>>>>> =
+        Arc::new(RwLock::new(HashMap::default()));
     let nr_total_sizes_to_check = duplicate_file_sizes.len();
     let chunk_size = nr_total_sizes_to_check / 16;
     let sizes_checked_so_far = Arc::new(RwLock::new(0f64));
+    let mut threads = vec![];
 
     for duplicate_file_size_chunk in duplicate_file_sizes
-        .chunks_mut(max(1, chunk_size))
-        .map(|x| x.to_owned())
+        .chunks(max(1, chunk_size))
+        .map(|x| x.to_vec())
     {
         let app_state = app_state.clone();
         let files_by_size_by_hash = files_by_size_by_hash.clone();
         let nr_total_sizes_to_check = nr_total_sizes_to_check as f64;
         let sizes_checked_so_far = sizes_checked_so_far.clone();
-        duplicates_search_by_filesize_threads.push(std::thread::spawn(move || {
+        threads.push(std::thread::spawn(move || {
             for duplicate_file_size in duplicate_file_size_chunk {
-                let mut files_by_size: Vec<FileKrakenFile> =
-                    get_files_by_size(&app_state, duplicate_file_size).unwrap();
+                let files_by_size = get_files_by_size(&app_state, duplicate_file_size).unwrap();
                 let nr_files_by_size = files_by_size.len();
                 set_processing_message(
                     &app_state,
@@ -87,21 +104,20 @@ pub fn run_find_file_duplicates(app_state: Arc<AppState>) -> Option<()> {
                         duplicate_file_size
                     ),
                 );
-                let mut threads = vec![];
+                let mut inner_threads = vec![];
                 for files in files_by_size
-                    .chunks_mut(max(1, nr_files_by_size / 4))
-                    .map(|x| x.to_owned())
+                    .chunks(max(1, nr_files_by_size / 4))
+                    .map(|x| x.to_vec())
                 {
                     let files_by_size_by_hash = files_by_size_by_hash
                         .write()
                         .unwrap()
                         .entry(duplicate_file_size)
-                        .or_insert(Arc::new(RwLock::new(HashMap::default())))
+                        .or_insert_with(|| Arc::new(RwLock::new(HashMap::default())))
                         .clone();
                     let _app_state = app_state.clone();
-                    threads.push(std::thread::spawn(move || {
+                    inner_threads.push(std::thread::spawn(move || {
                         for mut file in files {
-                            // calc hash
                             file.hash = Some(_app_state.calculate_file_hash(&file.path));
                             files_by_size_by_hash
                                 .write()
@@ -112,24 +128,41 @@ pub fn run_find_file_duplicates(app_state: Arc<AppState>) -> Option<()> {
                         }
                     }));
                 }
-                for thread in threads {
+                for thread in inner_threads {
                     thread.join().expect("Failed to join hashing thread");
                 }
                 *sizes_checked_so_far.write().unwrap() += 1.0;
             }
         }));
     }
-    for thread in duplicates_search_by_filesize_threads {
+
+    for thread in threads {
         thread.join().ok()?;
     }
 
+    let files_by_size_by_hash = Arc::try_unwrap(files_by_size_by_hash)
+        .ok()?
+        .into_inner()
+        .ok()?;
+    let mut result = HashMap::default();
+    for (size, hashes_arc) in files_by_size_by_hash {
+        let hashes = Arc::try_unwrap(hashes_arc).ok()?.into_inner().ok()?;
+        result.insert(size, hashes);
+    }
+    Some(result)
+}
+
+/// From the hashed buckets, populate the duplicate list in the application state.
+fn detect_duplicates(
+    app_state: &Arc<AppState>,
+    files_by_size_by_hash: &FilesBySizeByHash,
+) -> Option<()> {
     set_processing_message(
-        &app_state,
+        app_state,
         "Checking file-hashes for duplicates...".to_string(),
     );
-    let files_by_size_by_hash_lock = files_by_size_by_hash.write().ok()?;
-    for (_, files_by_size) in files_by_size_by_hash_lock.iter() {
-        for (_, files) in files_by_size.read().ok()?.iter() {
+    for files_by_size in files_by_size_by_hash.values() {
+        for files in files_by_size.values() {
             if files.len() > 1 {
                 let mut duplicates_list = app_state
                     .find_duplicates_processing
@@ -137,11 +170,11 @@ pub fn run_find_file_duplicates(app_state: Arc<AppState>) -> Option<()> {
                     .write()
                     .ok()?;
 
-                let deletable_file = get_deletable_file(&app_state, &files);
-                let other_files = if deletable_file.is_some() {
+                let deletable_file = get_deletable_file(app_state, files);
+                let other_files = if let Some(ref deletable_file) = deletable_file {
                     files
                         .iter()
-                        .filter(|x| x.path != deletable_file.as_ref().unwrap().path)
+                        .filter(|x| x.path != deletable_file.path)
                         .cloned()
                         .collect()
                 } else {
@@ -166,9 +199,6 @@ pub fn run_find_file_duplicates(app_state: Arc<AppState>) -> Option<()> {
             }
         }
     }
-
-    *get_duplicates_processing_state(&app_state).deref_mut() = FindDuplicatesStateType::Processed;
-
     Some(())
 }
 
