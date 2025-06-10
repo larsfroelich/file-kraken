@@ -93,27 +93,43 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
     }
 
     // check if files were removed
-    let files: Vec<String> = {
-        if let Some(sqlite_lock) = app_state.sqlite_lock_or_close() {
-            if let Some(conn) = sqlite_lock.as_ref() {
-                if let Ok(mut files_query) =
-                    conn.prepare("SELECT path FROM files WHERE location_path = ?")
-                {
-                    if let Ok(rows) = files_query.query_map(&[&location_path], |row| row.get(0)) {
-                        rows.filter_map(|x| x.ok()).collect()
-                    } else {
-                        vec![]
-                    }
-                } else {
-                    vec![]
-                }
-            } else {
-                vec![]
-            }
-        } else {
-            vec![]
+    // A failure to query the database here means the project state is no longer
+    // trustworthy. Notify the user and close the project on any error.
+    let mut files = Vec::new();
+    let sqlite_lock = match app_state.sqlite_lock_or_close() {
+        Some(l) => l,
+        None => return,
+    };
+    let conn = match sqlite_lock.as_ref() {
+        Some(c) => c,
+        None => {
+            error_dialog("Internal error: database connection missing. Closing project.");
+            app_state.close_project();
+            return;
         }
     };
+
+    let mut files_query = match conn.prepare("SELECT path FROM files WHERE location_path = ?") {
+        Ok(q) => q,
+        Err(err) => {
+            error_dialog(&format!("Failed to query database: {err}. Closing project."));
+            app_state.close_project();
+            return;
+        }
+    };
+
+    let rows = match files_query.query_map(&[&location_path], |row| row.get(0)) {
+        Ok(rows) => rows,
+        Err(err) => {
+            error_dialog(&format!("Failed to read from database: {err}. Closing project."));
+            app_state.close_project();
+            return;
+        }
+    };
+    files.extend(rows.filter_map(|x| x.ok()));
+    drop(files_query);
+    drop(sqlite_lock);
+    let files: Vec<String> = files;
     for file in files {
         // check filesystem
         if !std::path::Path::new(&file).exists() {
