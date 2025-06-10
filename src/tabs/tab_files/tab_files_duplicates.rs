@@ -1,3 +1,4 @@
+#![allow(clippy::collapsible_if)]
 use crate::processing::find_duplicates::{
     delete_duplicate, find_file_duplicates, get_duplicates_processing_state,
     set_processing_message, FindDuplicatesStateType,
