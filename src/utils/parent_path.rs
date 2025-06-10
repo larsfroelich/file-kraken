@@ -26,17 +26,19 @@ pub fn get_longest_parent_path<'a>(
             file_parent_location = location.path.clone();
         }
     });
-    if file_parent_location.len() > 0 {
-        Some(file_parent_location)
-    } else {
+    if file_parent_location.is_empty() {
         None
+    } else {
+        Some(file_parent_location)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{location::{FileKrakenLocation, FileKrakenLocationState, FileKrakenLocationType}};
+    use crate::state::location::{
+        FileKrakenLocation, FileKrakenLocationState, FileKrakenLocationType,
+    };
 
     #[test]
     fn test_is_path_parent_basic() {

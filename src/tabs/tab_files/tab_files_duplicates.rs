@@ -202,7 +202,7 @@ impl FileKrakenApp {
                                             .chain(ineligible_duplicates.iter())
                                             .nth(row.index())
                                         {
-                                            table_row(&self.app_state, &mut row, &duplicate);
+                                            table_row(&self.app_state, &mut row, duplicate);
                                         }
                                     },
                                 );
@@ -222,19 +222,18 @@ fn table_row(app_state: &Arc<AppState>, row: &mut TableRow, duplicate: &FileKrak
 
     row.col(|ui| {
         if duplicate.deletable_file.is_some() {
-            if ui.button("🗑️").clicked() {
-                if rfd::MessageDialog::new()
+            if ui.button("🗑️").clicked()
+                && rfd::MessageDialog::new()
                     .set_title("Delete file?")
                     .set_description(format!(
                         "Are you sure you want to delete the file \"{}\"?",
-                        duplicate.deletable_file.as_ref().unwrap().path.to_string()
+                        duplicate.deletable_file.as_ref().unwrap().path
                     ))
                     .set_buttons(rfd::MessageButtons::YesNo)
                     .show()
                     .eq(&MessageDialogResult::Yes)
-                {
-                    delete_duplicate(app_state, duplicate);
-                }
+            {
+                delete_duplicate(app_state, duplicate);
             }
         }
     });
@@ -248,7 +247,7 @@ fn table_row(app_state: &Arc<AppState>, row: &mut TableRow, duplicate: &FileKrak
     row.col(|ui| {
         unselectable_label(
             ui,
-            RichText::new(duplicate.other_files.get(0).unwrap().path.to_string()).color(color),
+            RichText::new(duplicate.other_files.first().unwrap().path.to_string()).color(color),
         );
     });
     row.col(|ui| {
@@ -269,7 +268,7 @@ fn table_row(app_state: &Arc<AppState>, row: &mut TableRow, duplicate: &FileKrak
     let metadata_file = duplicate
         .deletable_file
         .as_ref()
-        .or_else(|| duplicate.other_files.get(0))
+        .or_else(|| duplicate.other_files.first())
         .unwrap();
     row.col(|ui| {
         unselectable_label(

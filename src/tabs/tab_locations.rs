@@ -321,7 +321,7 @@ fn table_row(
             if ui.button("🗑️").clicked()
                 && rfd::MessageDialog::new()
                     .set_title("Remove location")
-                    .set_description(&format!(
+                    .set_description(format!(
                         "Are you sure you want to remove the location: \"{}\"?",
                         path
                     ))
