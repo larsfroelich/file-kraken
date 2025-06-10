@@ -502,13 +502,12 @@ impl AppState {
         location_type: &FileKrakenLocationType,
         location_state: &FileKrakenLocationState,
     ) {
-        assert!(self
+        assert!(!self
             .locations_list
             .read()
             .unwrap()
             .iter()
-            .find(|x| x.path == location_path)
-            .is_none());
+            .any(|x| x.path == location_path));
 
         if persist_to_db {
             self.sqlite
@@ -560,7 +559,7 @@ impl AppState {
             // look for the by-filepath hashmap for the given location
             .get(location)
             // clone the Arc reference of the Hashmap if it exists
-            .map(|x| x.clone())
+            .cloned()
     }
 
     /// Close the currently open project and clear all in-memory state.
