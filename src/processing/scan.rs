@@ -8,10 +8,13 @@ use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
 pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
-    let current_state = app_state
-        .get_location_clone(location_path)
-        .unwrap()
-        .location_state;
+    let current_state = match app_state.get_location_clone(location_path) {
+        Some(loc) => loc.location_state,
+        None => {
+            error_dialog(&format!("Location {location_path} not found"));
+            return;
+        }
+    };
     if current_state == FileKrakenLocationState::Scanning {
         return error_dialog("Already scanning this location");
     }
@@ -32,10 +35,17 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
                 } else {
                     FileKrakenFileType::Normal
                 };
-                let file_metadata = entry.metadata().expect(&format!(
-                    "Failed to get file metadata for file {:?}",
-                    entry.path()
-                ));
+                let file_metadata = match entry.metadata() {
+                    Ok(meta) => meta,
+                    Err(err) => {
+                        error!(
+                            "Failed to get file metadata for file {:?}: {}",
+                            entry.path(),
+                            err
+                        );
+                        continue;
+                    }
+                };
 
                 if let Some(file_path) = entry.path().to_str() {
                     app_state.add_file(
@@ -45,15 +55,15 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
                         file_metadata.len(),
                         file_metadata
                             .created()
-                            .unwrap()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap_or(std::time::Duration::new(0, 0))
+                            .ok()
+                            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                            .unwrap_or_default()
                             .as_secs(),
                         file_metadata
                             .modified()
-                            .unwrap()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap_or(std::time::Duration::new(0, 0))
+                            .ok()
+                            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                            .unwrap_or_default()
                             .as_secs(),
                         None,
                     );
@@ -84,17 +94,25 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
 
     // check if files were removed
     let files: Vec<String> = {
-        let sqlite_lock = app_state.sqlite.lock().unwrap();
-        let mut files_query = sqlite_lock
-            .as_ref()
-            .unwrap()
-            .prepare("SELECT path FROM files WHERE location_path = ?")
-            .unwrap();
-        files_query
-            .query_map(&[&location_path], |row| row.get(0))
-            .unwrap()
-            .map(|x| x.unwrap())
-            .collect()
+        if let Ok(sqlite_lock) = app_state.sqlite.lock() {
+            if let Some(conn) = sqlite_lock.as_ref() {
+                if let Ok(mut files_query) =
+                    conn.prepare("SELECT path FROM files WHERE location_path = ?")
+                {
+                    if let Ok(rows) = files_query.query_map(&[&location_path], |row| row.get(0)) {
+                        rows.filter_map(|x| x.ok()).collect()
+                    } else {
+                        vec![]
+                    }
+                } else {
+                    vec![]
+                }
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        }
     };
     for file in files {
         // check filesystem

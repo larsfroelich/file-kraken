@@ -3,6 +3,7 @@ use crate::state::file::{FileKrakenFile, FileKrakenFileType};
 use crate::state::location::{FileKrakenLocation, FileKrakenLocationState, FileKrakenLocationType};
 use crate::utils::get_longest_parent_path;
 use crate::utils::hashing::hash_file;
+use crate::utils::dialogs::error_dialog;
 use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard};
@@ -120,41 +121,40 @@ impl AppState {
         Ok(())
     }
 
-    pub fn calculate_file_hash(&self, file_path: &str) -> String {
+    pub fn calculate_file_hash(&self, file_path: &str) -> Option<String> {
         // get file to check if its already hashed
         let hash: String = self
             .sqlite
             .lock()
-            .unwrap()
-            .as_ref()
-            .expect("sqlite connection not set")
+            .ok()?
+            .as_ref()?
             .query_row(
                 "SELECT hash_256 FROM files WHERE path = ?1;",
                 [file_path],
                 |x| x.get(0),
             )
-            .unwrap();
+            .ok()?;
 
-        match hash.as_str() {
-            "NULL" => {
-                // calculate hash
-                let hash = hash_file(&file_path);
-
-                // update hash in sqlite
-                self.sqlite
-                    .lock()
-                    .unwrap()
-                    .as_ref()
-                    .expect("sqlite connection not set")
-                    .execute(
-                        "UPDATE files SET hash_256 = ?1 WHERE path = ?2;",
-                        [&hash, file_path],
-                    )
-                    .unwrap();
-
-                hash
+        if hash == "NULL" {
+            match hash_file(file_path) {
+                Ok(hash) => {
+                    if let Ok(sqlite_lock) = self.sqlite.lock() {
+                        if let Some(conn) = sqlite_lock.as_ref() {
+                            let _ = conn.execute(
+                                "UPDATE files SET hash_256 = ?1 WHERE path = ?2;",
+                                [&hash, file_path],
+                            );
+                        }
+                    }
+                    Some(hash)
+                }
+                Err(err) => {
+                    error_dialog(&format!("Failed to hash file {file_path}: {err}"));
+                    None
+                }
             }
-            x => x.to_string(),
+        } else {
+            Some(hash)
         }
     }
 
