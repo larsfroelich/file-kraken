@@ -4,8 +4,18 @@ use crate::state::AppState;
 use crate::utils::dialogs::error_dialog;
 use jwalk::WalkDir;
 use log::error;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
+
+fn is_archive_path(path: &Path) -> bool {
+    path.to_str()
+        .map(|p| {
+            let p = p.to_lowercase();
+            p.ends_with(".tar.xz") || p.ends_with(".zip") || p.ends_with(".7z")
+        })
+        .unwrap_or(false)
+}
 
 pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
     let current_state = match app_state.get_location_clone(location_path) {
@@ -23,16 +33,11 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
     let mut failed_paths = Vec::new();
     for entry in WalkDir::new(location_path).into_iter().flatten() {
         if entry.file_type.is_file() {
-            let file_type =
-                if let Some(file_extension) = entry.path().extension().and_then(|x| x.to_str()) {
-                    if [".tar.xz", ".zip", ".7z"].contains(&file_extension) {
-                        FileKrakenFileType::Archive
-                    } else {
-                        FileKrakenFileType::Normal
-                    }
-                } else {
-                    FileKrakenFileType::Normal
-                };
+            let file_type = if is_archive_path(&entry.path()) {
+                FileKrakenFileType::Archive
+            } else {
+                FileKrakenFileType::Normal
+            };
             let file_metadata = match entry.metadata() {
                 Ok(meta) => meta,
                 Err(err) => {
@@ -108,4 +113,12 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
     }
 
     app_state.modify_location_state(true, location_path, FileKrakenLocationState::Scanned);
+}
+
+#[test]
+fn test_is_archive_path_basic() {
+    assert!(is_archive_path(Path::new("/tmp/test.tar.xz")));
+    assert!(is_archive_path(Path::new("C:/files/archive.zip")));
+    assert!(is_archive_path(Path::new("foo/bar.7z")));
+    assert!(!is_archive_path(Path::new("/tmp/image.png")));
 }
