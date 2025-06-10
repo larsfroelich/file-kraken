@@ -30,7 +30,7 @@ pub struct FileKrakenApp {
     app_state: Arc<state::AppState>,
 }
 
-fn try_connect_sqlite(_self: &mut FileKrakenApp, path: &str) -> () {
+fn try_connect_sqlite(_self: &mut FileKrakenApp, path: &str) {
     if let Err(err) = _self.app_state.connect_sqlite(path) {
         error_dialog(&format!("Failed to create project file. Error: {}", err));
     }
@@ -53,7 +53,7 @@ impl eframe::App for FileKrakenApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         std::thread::sleep(Duration::from_micros((1.0 / 120.0 * 1_000_000.0) as u64));
         egui::CentralPanel::default().show(ctx, |ui| {
-            if self.app_state.is_sqlite_connected() == false {
+            if !self.app_state.is_sqlite_connected() {
                 ui.centered_and_justified(|ui| {
                     ui.vertical_centered(|ui| {
                         ui.heading("File Kraken");
