@@ -32,3 +32,40 @@ pub fn get_longest_parent_path<'a>(
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{location::{FileKrakenLocation, FileKrakenLocationState, FileKrakenLocationType}};
+
+    #[test]
+    fn test_is_path_parent_basic() {
+        assert!(is_path_parent("/foo/bar/baz.txt", "/foo"));
+        assert!(is_path_parent("/foo/bar/baz.txt", "/foo/bar"));
+        assert!(!is_path_parent("/foo/bar/baz.txt", "/fob"));
+        assert!(!is_path_parent("/foo/bar", "/foo/bar"));
+    }
+
+    #[test]
+    fn test_get_longest_parent_path() {
+        let locations = vec![
+            FileKrakenLocation {
+                path: "/foo".to_string(),
+                location_type: FileKrakenLocationType::Normal,
+                location_state: FileKrakenLocationState::Scanned,
+                parent_location_path: None,
+            },
+            FileKrakenLocation {
+                path: "/foo/bar".to_string(),
+                location_type: FileKrakenLocationType::Preferred,
+                location_state: FileKrakenLocationState::Scanned,
+                parent_location_path: Some("/foo".to_string()),
+            },
+        ];
+
+        let res = get_longest_parent_path("/foo/bar/baz/file.txt", locations.iter()).unwrap();
+        assert_eq!(res, "/foo/bar");
+        let none_res = get_longest_parent_path("/bar/baz.txt", locations.iter());
+        assert!(none_res.is_none());
+    }
+}

@@ -4,7 +4,6 @@ use crate::state::AppState;
 use crate::utils::dialogs::error_dialog;
 use jwalk::WalkDir;
 use log::error;
-use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 

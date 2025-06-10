@@ -3,7 +3,7 @@ use crate::state::location::{FileKrakenLocationState, FileKrakenLocationType};
 use crate::state::AppState;
 use crate::utils::ui_elements::{colored_box, unselectable_label};
 use crate::FileKrakenApp;
-use egui::{Label, RichText, TextStyle, Ui, Vec2, Window};
+use egui::{Label, RichText, TextStyle, Ui, Window};
 use egui_extras::{Column, TableBody, TableBuilder};
 use rfd::FileDialog;
 use std::sync::Arc;
