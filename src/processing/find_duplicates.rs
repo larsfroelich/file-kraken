@@ -165,20 +165,12 @@ fn detect_hashed_duplicates(
         "Checking file-hashes for duplicates...".to_string(),
     );
     for (_, files_by_size) in files_by_size_by_hash.iter() {
-        for (_, files) in match lock_rw_read_or_exit(files_by_size, app_state) {
-            Some(l) => l,
-            None => return None,
-        }
-        .iter()
-        {
+        for (_, files) in lock_rw_read_or_exit(files_by_size, app_state)?.iter() {
             if files.len() > 1 {
-                let mut duplicates_list = match lock_rw_write_or_exit(
+                let mut duplicates_list = lock_rw_write_or_exit(
                     &app_state.find_duplicates_processing.duplicates,
                     app_state,
-                ) {
-                    Some(lock) => lock,
-                    None => return None,
-                };
+                )?;
 
                 let deletable_file = get_deletable_file(app_state, files);
                 let other_files = if let Some(ref deletable) = deletable_file {
@@ -201,7 +193,7 @@ fn detect_hashed_duplicates(
                     duplicate
                         .deletable_file
                         .as_ref()
-                        .or_else(|| duplicate.other_files.get(0))
+                        .or_else(|| duplicate.other_files.first())
                         .map(|f| f.file_len)
                         .unwrap_or(0)
                 );
@@ -214,7 +206,7 @@ fn detect_hashed_duplicates(
 
 fn get_deletable_file(
     app_state: &Arc<AppState>,
-    files: &Vec<FileKrakenFile>,
+    files: &[FileKrakenFile],
 ) -> Option<FileKrakenFile> {
     let (preferred_file, normal_file) = {
         let file_locations: Vec<(FileKrakenFile, Option<FileKrakenLocation>)> = {

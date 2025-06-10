@@ -13,6 +13,7 @@ pub struct AppState {
     pub find_duplicates_processing: Arc<FindDuplicatesState>,
     pub sqlite: Arc<Mutex<Option<rusqlite::Connection>>>,
     locations_list: Arc<RwLock<Vec<FileKrakenLocation>>>,
+    #[allow(clippy::type_complexity)]
     files_by_location_by_path:
         Arc<RwLock<HashMap<String, Arc<RwLock<HashMap<String, FileKrakenFile>>>>>>,
 }
@@ -202,7 +203,7 @@ impl AppState {
             .unwrap()
             .iter_mut()
             .find(|x| x.path == location_path)
-            .expect(&format!("location {} not found", location_path))
+            .unwrap_or_else(|| panic!("location {} not found", location_path))
             .location_state = FileKrakenLocationState::Deleting;
 
         self.clear_location_files(persist_to_db, location_path);
@@ -241,8 +242,8 @@ impl AppState {
         }
 
         let file_parent_location_path =
-            get_longest_parent_path(&file_path, self.get_locations_list_readonly().iter())
-                .expect(&format!("no parent location found for file {}", file_path));
+            get_longest_parent_path(file_path, self.get_locations_list_readonly().iter())
+                .unwrap_or_else(|| panic!("no parent location found for file {}", file_path));
 
         self.files_by_location_by_path
             .read()
@@ -254,6 +255,7 @@ impl AppState {
             .remove(file_path);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn add_file(
         &self,
         persist_to_db: bool,
@@ -266,7 +268,7 @@ impl AppState {
     ) {
         let parent_location =
             get_longest_parent_path(file_path, self.get_locations_list_readonly().iter())
-                .expect(&format!("no parent location found for file {}", file_path));
+                .unwrap_or_else(|| panic!("no parent location found for file {}", file_path));
 
         self.add_file_to_location(
             persist_to_db,
@@ -280,6 +282,7 @@ impl AppState {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn add_file_to_location(
         &self,
         persist_to_db: bool,
@@ -322,7 +325,7 @@ impl AppState {
                     .ok()
             } {
                 if existing_location != location_path {
-                    self.remove_file(true, false, &file_path);
+                    self.remove_file(true, false, file_path);
                 }
             }
 
@@ -389,7 +392,7 @@ impl AppState {
             .unwrap()
             .iter()
             .find(|x| x.path == location_path)
-            .map(|x| x.clone())
+            .cloned()
     }
 
     pub fn get_locations_list_readonly(&self) -> RwLockReadGuard<'_, Vec<FileKrakenLocation>> {
