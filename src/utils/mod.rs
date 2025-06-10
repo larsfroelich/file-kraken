@@ -1,5 +1,6 @@
 pub mod dialogs;
 pub mod hashing;
+pub mod locks;
 mod parent_path;
 pub mod ui_elements;
 
