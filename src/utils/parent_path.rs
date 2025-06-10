@@ -36,7 +36,9 @@ pub fn get_longest_parent_path<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{location::{FileKrakenLocation, FileKrakenLocationState, FileKrakenLocationType}};
+    use crate::state::location::{
+        FileKrakenLocation, FileKrakenLocationState, FileKrakenLocationType,
+    };
 
     #[test]
     fn test_is_path_parent_basic() {
