@@ -1,9 +1,9 @@
-use crate::processing::find_duplicates::FindDuplicatesState;
+use crate::processing::find_duplicates::{FindDuplicatesState, FindDuplicatesStateType};
 use crate::state::file::{FileKrakenFile, FileKrakenFileType};
 use crate::state::location::{FileKrakenLocation, FileKrakenLocationState, FileKrakenLocationType};
+use crate::utils::dialogs::error_dialog;
 use crate::utils::get_longest_parent_path;
 use crate::utils::hashing::hash_file;
-use crate::utils::dialogs::error_dialog;
 use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard};
@@ -121,12 +121,24 @@ impl AppState {
         Ok(())
     }
 
+    /// Acquire the SQLite connection mutex or close the project on failure.
+    pub fn sqlite_lock_or_close(
+        &self,
+    ) -> Option<std::sync::MutexGuard<'_, Option<rusqlite::Connection>>> {
+        match self.sqlite.lock() {
+            Ok(g) => Some(g),
+            Err(_) => {
+                error_dialog("Internal error: database lock poisoned. Closing project.");
+                self.close_project();
+                None
+            }
+        }
+    }
+
     pub fn calculate_file_hash(&self, file_path: &str) -> Option<String> {
         // get file to check if its already hashed
         let hash: String = self
-            .sqlite
-            .lock()
-            .ok()?
+            .sqlite_lock_or_close()?
             .as_ref()?
             .query_row(
                 "SELECT hash_256 FROM files WHERE path = ?1;",
@@ -138,7 +150,7 @@ impl AppState {
         if hash == "NULL" {
             match hash_file(file_path) {
                 Ok(hash) => {
-                    if let Ok(sqlite_lock) = self.sqlite.lock() {
+                    if let Some(sqlite_lock) = self.sqlite_lock_or_close() {
                         if let Some(conn) = sqlite_lock.as_ref() {
                             let _ = conn.execute(
                                 "UPDATE files SET hash_256 = ?1 WHERE path = ?2;",
@@ -520,5 +532,24 @@ impl AppState {
             .get(location)
             // clone the Arc reference of the Hashmap if it exists
             .map(|x| x.clone())
+    }
+
+    /// Close the currently open project and clear all in-memory state.
+    pub fn close_project(&self) {
+        if let Ok(mut sqlite) = self.sqlite.lock() {
+            *sqlite = None;
+        }
+        if let Ok(mut locations) = self.locations_list.write() {
+            locations.clear();
+        }
+        if let Ok(mut files) = self.files_by_location_by_path.write() {
+            files.clear();
+        }
+        if let Ok(mut dups) = self.find_duplicates_processing.duplicates.write() {
+            dups.clear();
+        }
+        if let Ok(mut state) = self.find_duplicates_processing.state.write() {
+            *state = FindDuplicatesStateType::None;
+        }
     }
 }

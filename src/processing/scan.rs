@@ -94,7 +94,7 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
 
     // check if files were removed
     let files: Vec<String> = {
-        if let Ok(sqlite_lock) = app_state.sqlite.lock() {
+        if let Some(sqlite_lock) = app_state.sqlite_lock_or_close() {
             if let Some(conn) = sqlite_lock.as_ref() {
                 if let Ok(mut files_query) =
                     conn.prepare("SELECT path FROM files WHERE location_path = ?")

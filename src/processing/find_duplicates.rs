@@ -3,10 +3,11 @@ use crate::state::file::{FileKrakenFile, FileKrakenFileType};
 use crate::state::location::{FileKrakenLocation, FileKrakenLocationType};
 use crate::state::AppState;
 use crate::utils::get_longest_parent_path;
+use crate::utils::locks::{lock_rw_read_or_close, lock_rw_write_or_close};
 use egui::ahash::HashMap;
 use std::cmp::max;
 use std::ops::DerefMut;
-use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
+use std::sync::{Arc, RwLock, RwLockWriteGuard};
 
 #[derive(Default)]
 pub struct FindDuplicatesState {
@@ -48,15 +49,16 @@ pub fn run_find_file_duplicates(app_state: Arc<AppState>) -> Option<()> {
             .show();
         return Some(());
     }
-    app_state
-        .find_duplicates_processing
-        .duplicates
-        .write()
-        .ok()?
-        .clear();
+    if let Some(mut dups) =
+        lock_rw_write_or_close(&app_state.find_duplicates_processing.duplicates, &app_state)
+    {
+        dups.clear();
+    } else {
+        return None;
+    }
 
     set_processing_message(&app_state, "Scanning for file size matches...".to_string());
-    let mut duplicate_file_sizes = find_duplicate_file_sizes(&app_state.sqlite)?;
+    let mut duplicate_file_sizes = find_duplicate_file_sizes(&app_state)?;
 
     let files_by_size_by_hash = Arc::new(RwLock::new(HashMap::default()));
     let mut duplicates_search_by_filesize_threads = vec![];
@@ -74,7 +76,8 @@ pub fn run_find_file_duplicates(app_state: Arc<AppState>) -> Option<()> {
         let sizes_checked_so_far = sizes_checked_so_far.clone();
         duplicates_search_by_filesize_threads.push(std::thread::spawn(move || {
             for duplicate_file_size in duplicate_file_size_chunk {
-                let Some(mut files_by_size) = get_files_by_size(&app_state, duplicate_file_size) else {
+                let Some(mut files_by_size) = get_files_by_size(&app_state, duplicate_file_size)
+                else {
                     continue;
                 };
                 let nr_files_by_size = files_by_size.len();
@@ -131,15 +134,26 @@ pub fn run_find_file_duplicates(app_state: Arc<AppState>) -> Option<()> {
         &app_state,
         "Checking file-hashes for duplicates...".to_string(),
     );
-    let files_by_size_by_hash_lock = files_by_size_by_hash.write().ok()?;
+    let files_by_size_by_hash_lock =
+        match lock_rw_write_or_close(&files_by_size_by_hash, &app_state) {
+            Some(lock) => lock,
+            None => return None,
+        };
     for (_, files_by_size) in files_by_size_by_hash_lock.iter() {
-        for (_, files) in files_by_size.read().ok()?.iter() {
+        for (_, files) in match lock_rw_read_or_close(files_by_size, &app_state) {
+            Some(l) => l,
+            None => return None,
+        }
+        .iter()
+        {
             if files.len() > 1 {
-                let mut duplicates_list = app_state
-                    .find_duplicates_processing
-                    .duplicates
-                    .write()
-                    .ok()?;
+                let mut duplicates_list = match lock_rw_write_or_close(
+                    &app_state.find_duplicates_processing.duplicates,
+                    &app_state,
+                ) {
+                    Some(lock) => lock,
+                    None => return None,
+                };
 
                 let deletable_file = get_deletable_file(&app_state, &files);
                 let other_files = if let Some(ref deletable) = deletable_file {
@@ -214,7 +228,7 @@ fn get_deletable_file(
 }
 
 fn get_files_by_size(app_state: &Arc<AppState>, size: u64) -> Option<Vec<FileKrakenFile>> {
-    let sqlite_lock = app_state.sqlite.lock().ok()?;
+    let sqlite_lock = app_state.sqlite_lock_or_close()?;
     let mut files = vec![];
 
     let mut sqlite_query = sqlite_lock
@@ -262,10 +276,8 @@ pub fn set_processing_message(app_state: &Arc<AppState>, message: String) {
         FindDuplicatesStateType::Processing(message);
 }
 
-fn find_duplicate_file_sizes(
-    sqlite: &Arc<Mutex<Option<rusqlite::Connection>>>,
-) -> Option<Vec<u64>> {
-    let sqlite_lock = sqlite.lock().ok()?;
+fn find_duplicate_file_sizes(app_state: &Arc<AppState>) -> Option<Vec<u64>> {
+    let sqlite_lock = app_state.sqlite_lock_or_close()?;
     let mut find_duplicate_file_sizes = sqlite_lock
         .as_ref()?
         .prepare("SELECT file_len, COUNT(*) c FROM files f GROUP BY file_len HAVING c > 1")
