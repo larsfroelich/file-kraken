@@ -47,7 +47,6 @@ pub fn run_find_file_duplicates(app_state: Arc<AppState>) -> Option<()> {
             .show();
         return Some(());
     }
-
     clear_previous_duplicates(&app_state)?;
     set_processing_message(&app_state, "Scanning for file size matches...".to_string());
 
@@ -226,7 +225,7 @@ fn get_deletable_file(
                     (
                         file.clone(),
                         get_longest_parent_path(&file.path, locations.iter())
-                            .map(|x| locations.iter().find(|loc| loc.path == x).unwrap().clone()),
+                            .and_then(|p| locations.iter().find(|loc| loc.path == p).cloned()),
                     )
                 })
                 .collect()
