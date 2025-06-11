@@ -12,6 +12,7 @@ use crate::tabs::tab_files::FileKrakenFileTabs;
 use crate::tabs::tab_locations::LocationTabState;
 use crate::tabs::FileKrakenMainTabs;
 use crate::utils::dialogs::error_dialog;
+use catppuccin_egui::{set_theme, LATTE, MOCHA};
 use egui::{Align, FontId, Layout, RichText, Vec2};
 use rfd::FileDialog;
 use std::sync::Arc;
@@ -28,6 +29,8 @@ pub struct FileKrakenApp {
 
     // main app state
     app_state: Arc<state::AppState>,
+
+    dark_theme: bool,
 }
 
 fn try_connect_sqlite(_self: &mut FileKrakenApp, path: &str) {
@@ -110,6 +113,13 @@ impl eframe::App for FileKrakenApp {
                         RichText::from(String::from(" v") + VERSION)
                             .font(FontId::proportional(20.0)),
                     );
+                    if ui
+                        .button(if self.dark_theme { "☀️" } else { "🌙" })
+                        .clicked()
+                    {
+                        self.dark_theme = !self.dark_theme;
+                        set_theme(ctx, if self.dark_theme { MOCHA } else { LATTE });
+                    }
                 },
             );
 

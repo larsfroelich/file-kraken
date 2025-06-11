@@ -1422,6 +1422,7 @@ dependencies = [
  "rfd",
  "rusqlite",
  "sha2",
+ "tempfile",
 ]
 
 [[package]]

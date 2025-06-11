@@ -17,3 +17,4 @@ For now, File Kraken is still in development and there is no initial release yet
 To build and install directly from source, you can use
 
 `cargo install --git https://github.com/larsfroelich/file-kraken.git`
+

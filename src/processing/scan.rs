@@ -4,8 +4,18 @@ use crate::state::AppState;
 use crate::utils::dialogs::error_dialog;
 use jwalk::WalkDir;
 use log::error;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
+
+fn is_archive_path(path: &Path) -> bool {
+    path.to_str()
+        .map(|p| {
+            let p = p.to_lowercase();
+            p.ends_with(".tar.xz") || p.ends_with(".zip") || p.ends_with(".7z")
+        })
+        .unwrap_or(false)
+}
 
 pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
     let current_state = match app_state.get_location_clone(location_path) {
@@ -21,59 +31,51 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
     app_state.modify_location_state(true, location_path, FileKrakenLocationState::Scanning);
 
     let mut failed_paths = Vec::new();
-    for entry in WalkDir::new(location_path) {
-        if let Ok(entry) = entry {
-            if entry.file_type.is_file() {
-                let file_type = if let Some(file_extension) =
-                    entry.path().extension().and_then(|x| x.to_str())
-                {
-                    if [".tar.xz", ".zip", ".7z"].contains(&file_extension) {
-                        FileKrakenFileType::Archive
-                    } else {
-                        FileKrakenFileType::Normal
-                    }
-                } else {
-                    FileKrakenFileType::Normal
-                };
-                let file_metadata = match entry.metadata() {
-                    Ok(meta) => meta,
-                    Err(err) => {
-                        error!(
-                            "Failed to get file metadata for file {:?}: {}",
-                            entry.path(),
-                            err
-                        );
-                        continue;
-                    }
-                };
-
-                if let Some(file_path) = entry.path().to_str() {
-                    app_state.add_file(
-                        true,
-                        file_path,
-                        &file_type,
-                        file_metadata.len(),
-                        file_metadata
-                            .created()
-                            .ok()
-                            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                            .unwrap_or_default()
-                            .as_secs(),
-                        file_metadata
-                            .modified()
-                            .ok()
-                            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                            .unwrap_or_default()
-                            .as_secs(),
-                        None,
-                    );
-                } else {
+    for entry in WalkDir::new(location_path).into_iter().flatten() {
+        if entry.file_type.is_file() {
+            let file_type = if is_archive_path(&entry.path()) {
+                FileKrakenFileType::Archive
+            } else {
+                FileKrakenFileType::Normal
+            };
+            let file_metadata = match entry.metadata() {
+                Ok(meta) => meta,
+                Err(err) => {
                     error!(
-                        "Failed to get file path for file {:?}",
-                        entry.path().to_string_lossy().as_ref()
+                        "Failed to get file metadata for file {:?}: {}",
+                        entry.path(),
+                        err
                     );
-                    failed_paths.push(entry.path().to_string_lossy().to_string());
+                    continue;
                 }
+            };
+
+            if let Some(file_path) = entry.path().to_str() {
+                app_state.add_file(
+                    true,
+                    file_path,
+                    &file_type,
+                    file_metadata.len(),
+                    file_metadata
+                        .created()
+                        .ok()
+                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                        .unwrap_or_default()
+                        .as_secs(),
+                    file_metadata
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                        .unwrap_or_default()
+                        .as_secs(),
+                    None,
+                );
+            } else {
+                error!(
+                    "Failed to get file path for file {:?}",
+                    entry.path().to_string_lossy().as_ref()
+                );
+                failed_paths.push(entry.path().to_string_lossy().to_string());
             }
         }
     }
@@ -98,13 +100,7 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
     let files: Vec<String> = match app_state.with_sqlite_conn(|conn| {
         let mut stmt = conn.prepare("SELECT path FROM files WHERE location_path = ?")?;
         let rows = stmt.query_map([location_path], |row| row.get(0))?;
-        let mut out = Vec::new();
-        for row in rows {
-            if let Ok(p) = row {
-                out.push(p);
-            }
-        }
-        Ok(out)
+        Ok(rows.flatten().collect())
     }) {
         Some(v) => v,
         None => return,
@@ -117,4 +113,12 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
     }
 
     app_state.modify_location_state(true, location_path, FileKrakenLocationState::Scanned);
+}
+
+#[test]
+fn test_is_archive_path_basic() {
+    assert!(is_archive_path(Path::new("/tmp/test.tar.xz")));
+    assert!(is_archive_path(Path::new("C:/files/archive.zip")));
+    assert!(is_archive_path(Path::new("foo/bar.7z")));
+    assert!(!is_archive_path(Path::new("/tmp/image.png")));
 }

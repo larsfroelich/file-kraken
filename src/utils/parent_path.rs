@@ -26,10 +26,10 @@ pub fn get_longest_parent_path<'a>(
             file_parent_location = location.path.clone();
         }
     });
-    if !file_parent_location.is_empty() {
-        Some(file_parent_location)
-    } else {
+    if file_parent_location.is_empty() {
         None
+    } else {
+        Some(file_parent_location)
     }
 }
 

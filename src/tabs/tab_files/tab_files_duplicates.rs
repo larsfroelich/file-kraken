@@ -1,3 +1,4 @@
+#![allow(clippy::collapsible_if)]
 use crate::processing::find_duplicates::{
     delete_duplicate, find_file_duplicates, get_duplicates_processing_state,
     set_processing_message, FindDuplicatesStateType,
@@ -157,6 +158,7 @@ impl FileKrakenApp {
                     .show(ui, |ui| {
                         TableBuilder::new(ui)
                             .sense(egui::Sense::click())
+                            .striped(true)
                             .column(Column::exact(25.0))
                             .column(Column::exact(15.0))
                             .column(Column::remainder())
