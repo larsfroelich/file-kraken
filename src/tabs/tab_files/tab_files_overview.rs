@@ -5,10 +5,15 @@ use egui::Ui;
 impl FileKrakenApp {
     pub fn files_tab_overview(&mut self, ui: &mut Ui) {
         ui.vertical(|ui| {
-            colored_box(ui, egui::Color32::LIGHT_GRAY, |ui| {
-                ui.label("Files Overview");
-            });
-            colored_box(ui, egui::Color32::TRANSPARENT, |ui| {
+            colored_box(
+                ui,
+                egui::Color32::LIGHT_GRAY,
+                egui::Stroke::new(1.0, egui::Color32::DARK_GRAY),
+                |ui| {
+                    ui.label("Files Overview");
+                },
+            );
+            colored_box(ui, egui::Color32::TRANSPARENT, egui::Stroke::NONE, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Total Files: ");
                     let mut total_files = 0;
