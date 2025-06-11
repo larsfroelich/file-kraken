@@ -1,8 +1,13 @@
 use egui::{Label, Ui, WidgetText};
 
-pub fn colored_box(ui: &mut Ui, color: egui::Color32, f: impl FnOnce(&mut Ui)) {
+pub fn colored_box(
+    ui: &mut Ui, 
+    color: egui::Color32, 
+    f: impl FnOnce(&mut Ui)
+) {
     egui::Frame::none()
         .fill(color)
+        .stroke(egui::Stroke::NONE)
         .outer_margin(12.0)
         .inner_margin(6.0)
         .show(ui, f);

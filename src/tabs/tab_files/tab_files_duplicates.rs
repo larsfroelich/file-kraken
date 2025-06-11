@@ -17,7 +17,7 @@ use std::thread;
 impl FileKrakenApp {
     pub fn files_tab_duplicates(&mut self, ui: &mut Ui) {
         ui.vertical(|ui| {
-            colored_box(ui, Color32::LIGHT_GRAY, |ui| {
+            colored_box(ui, Color32::TRANSPARENT, |ui| {
                 ui.label("File Duplicates");
             });
             colored_box(ui, Color32::TRANSPARENT, |ui| {
