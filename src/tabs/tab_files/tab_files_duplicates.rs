@@ -17,10 +17,15 @@ use std::thread;
 impl FileKrakenApp {
     pub fn files_tab_duplicates(&mut self, ui: &mut Ui) {
         ui.vertical(|ui| {
-            colored_box(ui, Color32::TRANSPARENT, |ui| {
-                ui.label("File Duplicates");
-            });
-            colored_box(ui, Color32::TRANSPARENT, |ui| {
+            colored_box(
+                ui,
+                Color32::TRANSPARENT,
+                egui::Stroke::new(1.0, egui::Color32::DARK_GRAY),
+                |ui| {
+                    ui.label("File Duplicates");
+                },
+            );
+            colored_box(ui, Color32::TRANSPARENT, egui::Stroke::NONE, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Status: ");
                     match self

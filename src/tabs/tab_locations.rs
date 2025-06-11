@@ -35,10 +35,10 @@ impl FileKrakenApp {
 fn right_column(_self: &mut FileKrakenApp, ui: &mut Ui) {
     if let Some(selected_location) = &_self.tab_state_locations.selected_location {
         if let Some(location) = _self.app_state.get_location_clone(selected_location) {
-            colored_box(ui, egui::Color32::LIGHT_GRAY, |ui| {
+            colored_box(ui, egui::Color32::LIGHT_GRAY, egui::Stroke::NONE, |ui| {
                 ui.label("Location details:");
             });
-            colored_box(ui, egui::Color32::TRANSPARENT, |ui| {
+            colored_box(ui, egui::Color32::TRANSPARENT, egui::Stroke::NONE, |ui| {
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
                         ui.label("Path:");
@@ -95,10 +95,10 @@ fn right_column(_self: &mut FileKrakenApp, ui: &mut Ui) {
                 });
             });
 
-            colored_box(ui, egui::Color32::LIGHT_GRAY, |ui| {
+            colored_box(ui, egui::Color32::LIGHT_GRAY, egui::Stroke::NONE, |ui| {
                 ui.label("Location status:");
             });
-            colored_box(ui, egui::Color32::TRANSPARENT, |ui| {
+            colored_box(ui, egui::Color32::TRANSPARENT, egui::Stroke::NONE, |ui| {
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
                         ui.label("State:");
@@ -134,12 +134,12 @@ fn right_column(_self: &mut FileKrakenApp, ui: &mut Ui) {
                 });
             });
         } else {
-            colored_box(ui, egui::Color32::LIGHT_GRAY, |ui| {
+            colored_box(ui, egui::Color32::LIGHT_GRAY, egui::Stroke::NONE, |ui| {
                 ui.vertical_centered_justified(|ui| ui.label("Selected location not found"));
             });
         }
     } else {
-        colored_box(ui, egui::Color32::LIGHT_GRAY, |ui| {
+        colored_box(ui, egui::Color32::LIGHT_GRAY, egui::Stroke::NONE, |ui| {
             ui.vertical_centered_justified(|ui| ui.label("No location selected"));
         });
     }
