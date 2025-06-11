@@ -158,6 +158,7 @@ impl FileKrakenApp {
                     .show(ui, |ui| {
                         TableBuilder::new(ui)
                             .sense(egui::Sense::click())
+                            .striped(true)
                             .column(Column::exact(25.0))
                             .column(Column::exact(15.0))
                             .column(Column::remainder())
