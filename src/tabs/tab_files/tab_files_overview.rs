@@ -7,7 +7,7 @@ impl FileKrakenApp {
         ui.vertical(|ui| {
             colored_box(
                 ui,
-                egui::Color32::LIGHT_GRAY,
+                egui::Color32::TRANSPARENT,
                 egui::Stroke::new(1.0, egui::Color32::DARK_GRAY),
                 |ui| {
                     ui.label("Files Overview");
