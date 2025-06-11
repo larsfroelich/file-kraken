@@ -55,6 +55,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 impl eframe::App for FileKrakenApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         std::thread::sleep(Duration::from_micros((1.0 / 120.0 * 1_000_000.0) as u64));
+        set_theme(ctx, if self.dark_theme { MOCHA } else { LATTE });
             if !self.app_state.is_sqlite_connected() {
                 ui.centered_and_justified(|ui| {
                     ui.vertical_centered(|ui| {
@@ -112,18 +113,17 @@ impl eframe::App for FileKrakenApp {
                         RichText::from(String::from(" v") + VERSION)
                             .font(FontId::proportional(20.0)),
                     );
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui
+                            .button(if self.dark_theme { "☀️" } else { "🌙" })
+                            .clicked()
+                        {
+                            self.dark_theme = !self.dark_theme;
+                            ctx.request_repaint();
+                        }
+                    });
                 },
             );
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui
-                    .button(if self.dark_theme { "☀️" } else { "🌙" })
-                    .clicked()
-                {
-                    self.dark_theme = !self.dark_theme;
-                    set_theme(ctx, if self.dark_theme { MOCHA } else { LATTE });
-                    ctx.request_repaint();
-                    set_theme(ctx, if self.dark_theme { MOCHA } else { LATTE });
-                    ctx.request_repaint();
                 }
             });
 
