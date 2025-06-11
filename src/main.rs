@@ -55,6 +55,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 impl eframe::App for FileKrakenApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         std::thread::sleep(Duration::from_micros((1.0 / 120.0 * 1_000_000.0) as u64));
+        set_theme(ctx, if self.dark_theme { MOCHA } else { LATTE });
         egui::CentralPanel::default().show(ctx, |ui| {
             if !self.app_state.is_sqlite_connected() {
                 ui.centered_and_justified(|ui| {
@@ -121,7 +122,6 @@ impl eframe::App for FileKrakenApp {
                     .clicked()
                 {
                     self.dark_theme = !self.dark_theme;
-                    set_theme(ctx, if self.dark_theme { MOCHA } else { LATTE });
                 }
             });
 
