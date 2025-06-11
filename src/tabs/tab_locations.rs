@@ -270,6 +270,7 @@ fn left_column(_self: &mut FileKrakenApp, ui: &mut Ui) {
             let available_width = ui.available_width();
             TableBuilder::new(ui)
                 .sense(egui::Sense::click())
+                .striped(true)
                 .column(Column::exact(16.0))
                 .column(Column::exact(20.0))
                 .column(Column::exact(available_width - 36.0))
