@@ -1,11 +1,11 @@
 [package]
 name = "file-kraken"
-version = "1.0.13"
+version = "1.0.14"
 edition = "2021"
 
 [dependencies]
 catppuccin-egui = { version = "5.2.0", default-features = false, features = ["egui28"] }
-eframe = "0.28.1"
+eframe = { version= "0.28.1", default-features = false, features = ["wgpu"] }
 egui = "0.28.1"
 egui_extras = "0.28.1"
 env_logger = "0.11.5"
