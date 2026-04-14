@@ -77,11 +77,7 @@ fn right_column(_self: &mut FileKrakenApp, ui: &mut Ui) {
                         ui.label(
                             _self
                                 .app_state
-                                .get_files_by_location(&location.path)
-                                .unwrap()
-                                .read()
-                                .unwrap()
-                                .len()
+                                .get_location_files_count(&location.path)
                                 .to_string(),
                         );
                     });

@@ -399,6 +399,51 @@ impl AppState {
         self.locations_list.read().unwrap()
     }
 
+    pub fn get_location_files_count(&self, location: &str) -> usize {
+        let location_files = {
+            self.files_by_location_by_path
+                .read()
+                .unwrap()
+                .get(location)
+                .cloned()
+        };
+
+        location_files
+            .map(|files| files.read().unwrap().len())
+            .unwrap_or_default()
+    }
+
+    pub fn get_total_files_count(&self) -> usize {
+        let location_files = self
+            .files_by_location_by_path
+            .read()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+
+        location_files
+            .iter()
+            .map(|files| files.read().unwrap().len())
+            .sum()
+    }
+
+    pub fn has_active_background_work(&self) -> bool {
+        // Keep repainting while duplicate processing is running.
+        if matches!(
+            &*self.find_duplicates_processing.state.read().unwrap(),
+            FindDuplicatesStateType::Processing(_)
+        ) {
+            return true;
+        }
+
+        // Keep repainting while any location is in a transient state.
+        self.locations_list.read().unwrap().iter().any(|location| {
+            location.location_state == FileKrakenLocationState::Scanning
+                || location.location_state == FileKrakenLocationState::Deleting
+        })
+    }
+
     pub fn modify_location_type(&self, location_path: &str, location_type: FileKrakenLocationType) {
         // do nothing if type is the same
         let current_location_type = self

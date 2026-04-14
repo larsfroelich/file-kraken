@@ -16,7 +16,6 @@ use catppuccin_egui::{set_theme, LATTE, MOCHA};
 use egui::{Align, FontId, Layout, RichText, Vec2};
 use rfd::FileDialog;
 use std::sync::Arc;
-use std::time::Duration;
 
 #[derive(Default)]
 pub struct FileKrakenApp {
@@ -54,7 +53,6 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 impl eframe::App for FileKrakenApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        std::thread::sleep(Duration::from_micros((1.0 / 120.0 * 1_000_000.0) as u64));
         egui::CentralPanel::default().show(ctx, |ui| {
             if !self.app_state.is_sqlite_connected() {
                 ui.centered_and_justified(|ui| {
@@ -142,6 +140,11 @@ impl eframe::App for FileKrakenApp {
                 FileKrakenMainTabs::Files => self.files_tab(ui),
             }
         });
+
+        // Repaint periodically only while background work is active.
+        if self.app_state.has_active_background_work() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
+        }
     }
 }
 
