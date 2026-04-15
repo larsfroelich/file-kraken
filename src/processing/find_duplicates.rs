@@ -271,13 +271,14 @@ fn get_files_by_size(app_state: &Arc<AppState>, size: u64) -> Option<Vec<FileKra
                     panic!("unknown file type {}", x)
                 }
             };
+            let hash: Option<String> = row.get(5)?;
             files.push(FileKrakenFile {
                 path: file_path,
                 file_type,
                 file_len: row.get(2)?,
                 time_created: row.get(3)?,
                 time_modified: row.get(4)?,
-                hash: row.get(5)?,
+                hash,
             });
         }
         Ok(files)

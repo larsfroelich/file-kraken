@@ -21,6 +21,7 @@ pub struct AppState {
 impl AppState {
     pub fn connect_sqlite(&self, path: &str) -> Result<(), rusqlite::Error> {
         let connection = rusqlite::Connection::open(path)?;
+        // Create schema objects
         connection.execute(
             "CREATE TABLE IF NOT EXISTS locations (
                 path TEXT PRIMARY KEY,
@@ -56,6 +57,11 @@ impl AppState {
         connection.execute(
             "CREATE INDEX IF NOT EXISTS file_hash_index
                 ON files(hash_256);",
+            [],
+        )?;
+        // Normalize legacy placeholder values to real SQL NULL
+        connection.execute(
+            "UPDATE files SET hash_256 = NULL WHERE hash_256 = 'NULL';",
             [],
         )?;
 
@@ -97,6 +103,7 @@ impl AppState {
                         panic!("unknown file type {}", x)
                     }
                 };
+                let hash: Option<String> = row.get(5)?;
 
                 self.add_file(
                     false,
@@ -105,7 +112,7 @@ impl AppState {
                     row.get(2)?,
                     row.get(3)?,
                     row.get(4)?,
-                    row.get(5)?,
+                    hash,
                 )
             }
         }
@@ -163,8 +170,8 @@ impl AppState {
     }
 
     pub fn calculate_file_hash(&self, file_path: &str) -> Option<String> {
-        // get file to check if its already hashed
-        let hash: String = self.with_sqlite_conn(|conn| {
+        // Check if this file has an existing hash in DB
+        let hash: Option<String> = self.with_sqlite_conn(|conn| {
             conn.query_row(
                 "SELECT hash_256 FROM files WHERE path = ?1;",
                 [file_path],
@@ -172,24 +179,25 @@ impl AppState {
             )
         })?;
 
-        if hash == "NULL" {
-            match hash_file(file_path) {
-                Ok(hash) => {
-                    let _ = self.with_sqlite_conn(|conn| {
-                        conn.execute(
-                            "UPDATE files SET hash_256 = ?1 WHERE path = ?2;",
-                            [&hash, file_path],
-                        )
-                    });
-                    Some(hash)
-                }
-                Err(err) => {
-                    error_dialog(&format!("Failed to hash file {file_path}: {err}"));
-                    None
-                }
+        if let Some(existing_hash) = hash {
+            return Some(existing_hash);
+        }
+
+        // Compute hash only when DB has SQL NULL
+        match hash_file(file_path) {
+            Ok(hash) => {
+                let _ = self.with_sqlite_conn(|conn| {
+                    conn.execute(
+                        "UPDATE files SET hash_256 = ?1 WHERE path = ?2;",
+                        rusqlite::params![hash, file_path],
+                    )
+                });
+                Some(hash)
             }
-        } else {
-            Some(hash)
+            Err(err) => {
+                error_dialog(&format!("Failed to hash file {file_path}: {err}"));
+                None
+            }
         }
     }
 
@@ -311,6 +319,7 @@ impl AppState {
         );
 
         if persist_to_db {
+            let file_hash = file.hash.clone();
             if let Some((_, existing_location)) = {
                 self.sqlite
                     .lock()
@@ -344,17 +353,14 @@ impl AppState {
                     time_modified,\
                     hash_256\
                 ) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(path) DO NOTHING;",
-                    [
+                    rusqlite::params![
                         file_path,
                         location_path,
                         "normal",
-                        &file_len.to_string(),
-                        &time_created.to_string(),
-                        &time_modified.to_string(),
-                        &(match &file.hash {
-                            Some(x) => x.to_string(),
-                            None => "NULL".to_string(),
-                        }),
+                        file_len,
+                        time_created,
+                        time_modified,
+                        file_hash,
                     ],
                 )
                 .unwrap();
