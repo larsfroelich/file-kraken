@@ -206,6 +206,7 @@ impl AppState {
     }
 
     pub fn remove_location(&self, persist_to_db: bool, location_path: &str) {
+        // mark location as deleting before removing any related state
         self.locations_list
             .write()
             .unwrap()
@@ -214,13 +215,27 @@ impl AppState {
             .unwrap_or_else(|| panic!("location {} not found", location_path))
             .location_state = FileKrakenLocationState::Deleting;
 
+        // remove dependent files first
         self.clear_location_files(persist_to_db, location_path);
 
+        // remove location row from sqlite when persistence is enabled
+        if persist_to_db {
+            self.sqlite
+                .lock()
+                .unwrap()
+                .as_ref()
+                .expect("Sql connection not set")
+                .execute("DELETE FROM locations WHERE path = ?1;", [location_path])
+                .unwrap();
+        }
+
+        // clear in-memory file index for this location
         self.files_by_location_by_path
             .write()
             .unwrap()
             .remove(location_path);
 
+        // remove location from in-memory list
         let mut locations_list = self.locations_list.write().unwrap();
         locations_list.retain(|x| x.path != location_path);
     }
@@ -634,4 +649,50 @@ impl AppState {
             *state = FindDuplicatesStateType::None;
         }
     }
+}
+
+#[cfg(test)]
+fn temp_project_path() -> std::path::PathBuf {
+    let file = tempfile::Builder::new()
+        .prefix("file-kraken-remove-location")
+        .suffix(".fkproj")
+        .tempfile()
+        .unwrap();
+    file.into_temp_path().keep().unwrap()
+}
+
+#[test]
+fn remove_location_persisted_does_not_reload_from_same_project_file() {
+    let project_path = temp_project_path();
+    let project_path_str = project_path.to_str().unwrap();
+
+    // create a project with one location and one file
+    let app_state = AppState::default();
+    app_state.connect_sqlite(project_path_str).unwrap();
+    app_state.add_location(
+        true,
+        "/tmp/remove-me",
+        &FileKrakenLocationType::Normal,
+        &FileKrakenLocationState::Unscanned,
+    );
+    app_state.add_file_to_location(
+        true,
+        "/tmp/remove-me",
+        "/tmp/remove-me/file.txt",
+        &FileKrakenFileType::Normal,
+        10,
+        100,
+        100,
+        None,
+    );
+    app_state.remove_location(true, "/tmp/remove-me");
+    app_state.close_project();
+
+    // reconnect to same project and ensure location is gone
+    let reloaded = AppState::default();
+    reloaded.connect_sqlite(project_path_str).unwrap();
+    assert!(reloaded.get_locations_list_readonly().is_empty());
+    assert_eq!(reloaded.get_total_files_count(), 0);
+
+    std::fs::remove_file(project_path).unwrap();
 }
