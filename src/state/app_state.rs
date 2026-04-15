@@ -371,7 +371,7 @@ impl AppState {
                     rusqlite::params![
                         file_path,
                         location_path,
-                        "normal",
+                        file_type.as_str(),
                         file_len,
                         time_created,
                         time_modified,
@@ -649,6 +649,48 @@ impl AppState {
             *state = FindDuplicatesStateType::None;
         }
     }
+}
+
+#[test]
+fn add_file_to_location_persists_archive_file_type() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let sqlite_path = temp_dir.path().join("state.sqlite");
+    let sqlite_path_str = sqlite_path.to_str().unwrap();
+
+    let state = AppState::default();
+    state.connect_sqlite(sqlite_path_str).unwrap();
+    state.add_location(
+        true,
+        "/test/location",
+        &FileKrakenLocationType::Normal,
+        &FileKrakenLocationState::Scanned,
+    );
+    state.add_file_to_location(
+        true,
+        "/test/location",
+        "/test/location/archive.zip",
+        &FileKrakenFileType::Archive,
+        10,
+        20,
+        30,
+        None,
+    );
+    state.close_project();
+
+    let reloaded_state = AppState::default();
+    reloaded_state.connect_sqlite(sqlite_path_str).unwrap();
+
+    let files = reloaded_state
+        .get_files_by_location("/test/location")
+        .unwrap();
+    let loaded_file = files
+        .read()
+        .unwrap()
+        .get("/test/location/archive.zip")
+        .unwrap()
+        .clone();
+
+    assert_eq!(loaded_file.file_type, FileKrakenFileType::Archive);
 }
 
 #[cfg(test)]
