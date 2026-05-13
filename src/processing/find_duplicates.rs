@@ -4,15 +4,30 @@ use crate::state::location::{FileKrakenLocation, FileKrakenLocationType};
 use crate::state::AppState;
 use crate::utils::get_longest_parent_path;
 use crate::utils::locks::{lock_rw_read_or_exit, lock_rw_write_or_exit};
+use crate::utils::size_unit::SizeUnit;
 use egui::ahash::HashMap;
 use std::cmp::max;
 use std::ops::DerefMut;
 use std::sync::{Arc, RwLock, RwLockWriteGuard};
 
-#[derive(Default)]
 pub struct FindDuplicatesState {
     pub duplicates: RwLock<Vec<FileKrakenDuplicate>>,
     pub state: RwLock<FindDuplicatesStateType>,
+    pub min_file_size_input: RwLock<String>,
+    pub min_file_size_unit: RwLock<SizeUnit>,
+    pub include_same_location_duplicates: RwLock<bool>,
+}
+
+impl Default for FindDuplicatesState {
+    fn default() -> Self {
+        Self {
+            duplicates: RwLock::new(vec![]),
+            state: RwLock::new(FindDuplicatesStateType::None),
+            min_file_size_input: RwLock::new("0".to_string()),
+            min_file_size_unit: RwLock::new(SizeUnit::MB),
+            include_same_location_duplicates: RwLock::new(false),
+        }
+    }
 }
 
 #[derive(Default, PartialEq)]
@@ -297,10 +312,42 @@ pub fn set_processing_message(app_state: &Arc<AppState>, message: String) {
 }
 
 fn find_duplicate_file_sizes(app_state: &Arc<AppState>) -> Option<Vec<u64>> {
+    let min_size = {
+        let input = app_state
+            .find_duplicates_processing
+            .min_file_size_input
+            .read()
+            .unwrap();
+        let unit = app_state
+            .find_duplicates_processing
+            .min_file_size_unit
+            .read()
+            .unwrap();
+        input.parse::<u64>().unwrap_or(0) * unit.multiplier()
+    };
+
+    let include_same_location = *app_state
+        .find_duplicates_processing
+        .include_same_location_duplicates
+        .read()
+        .unwrap();
+
     app_state.with_sqlite_conn(|conn| {
-        let mut stmt = conn
-            .prepare("SELECT file_len, COUNT(*) c FROM files f GROUP BY file_len HAVING c > 1")?;
-        let mut query = stmt.query([])?;
+        let mut stmt = if include_same_location {
+            conn.prepare(
+                "SELECT file_len, COUNT(*) c FROM files f \
+                 WHERE file_len >= ?1 \
+                 GROUP BY file_len HAVING c > 1",
+            )?
+        } else {
+            conn.prepare(
+                "SELECT file_len, COUNT(*) c FROM files f \
+                 WHERE file_len >= ?1 \
+                 GROUP BY file_len HAVING c > 1 AND (SELECT COUNT(DISTINCT location_path) FROM files f2 WHERE f2.file_len = f.file_len) > 1",
+            )?
+        };
+
+        let mut query = stmt.query([min_size])?;
         let mut sizes = vec![];
         while let Some(row) = query.next()? {
             sizes.push(row.get(0)?);

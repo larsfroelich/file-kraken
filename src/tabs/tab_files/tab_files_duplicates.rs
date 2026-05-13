@@ -3,6 +3,7 @@ use crate::processing::find_duplicates::{
     delete_duplicate, find_file_duplicates, get_duplicates_processing_state,
     set_processing_message, FindDuplicatesStateType,
 };
+use crate::utils::size_unit::SizeUnit;
 use crate::state::duplicate::FileKrakenDuplicate;
 use crate::state::AppState;
 use crate::utils::ui_elements::{colored_box, unselectable_label};
@@ -28,14 +29,8 @@ impl FileKrakenApp {
             colored_box(ui, Color32::TRANSPARENT, egui::Stroke::NONE, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Status: ");
-                    match self
-                        .app_state
-                        .find_duplicates_processing
-                        .state
-                        .read()
-                        .unwrap()
-                        .deref()
-                    {
+                    let state = self.app_state.find_duplicates_processing.state.read().unwrap();
+                    match state.deref() {
                         FindDuplicatesStateType::None => {
                             ui.label("Idle");
                             if ui.button("Find Duplicates").clicked() {
@@ -63,6 +58,87 @@ impl FileKrakenApp {
                             }
                         }
                     }
+
+                    let is_processing = matches!(*state, FindDuplicatesStateType::Processing(_));
+                    ui.add_enabled_ui(!is_processing, |ui| {
+                        ui.add_space(20.0);
+                        ui.label("Min file size:");
+                        let mut min_size_input = self
+                            .app_state
+                            .find_duplicates_processing
+                            .min_file_size_input
+                            .read()
+                            .unwrap()
+                            .clone();
+                        if ui
+                            .add(
+                                egui::TextEdit::singleline(&mut min_size_input)
+                                    .desired_width(100.0),
+                            )
+                            .changed()
+                        {
+                            // only allow numbers
+                            if min_size_input.chars().all(|c| c.is_ascii_digit()) {
+                                *self
+                                    .app_state
+                                    .find_duplicates_processing
+                                    .min_file_size_input
+                                    .write()
+                                    .unwrap() = min_size_input.clone();
+                                self.app_state
+                                    .set_setting("min_file_size_input", &min_size_input);
+                            }
+                        }
+
+                        let mut min_size_unit = *self
+                            .app_state
+                            .find_duplicates_processing
+                            .min_file_size_unit
+                            .read()
+                            .unwrap();
+                        egui::ComboBox::from_id_source("min_file_size_unit")
+                            .selected_text(min_size_unit.to_string())
+                            .show_ui(ui, |ui| {
+                                for unit in SizeUnit::all() {
+                                    if ui
+                                        .selectable_value(&mut min_size_unit, unit, unit.to_string())
+                                        .clicked()
+                                    {
+                                        *self
+                                            .app_state
+                                            .find_duplicates_processing
+                                            .min_file_size_unit
+                                            .write()
+                                            .unwrap() = unit;
+                                        self.app_state
+                                            .set_setting("min_file_size_unit", &unit.to_string());
+                                    }
+                                }
+                            });
+
+                        ui.add_space(20.0);
+                        let mut include_same = *self
+                            .app_state
+                            .find_duplicates_processing
+                            .include_same_location_duplicates
+                            .read()
+                            .unwrap();
+                        if ui
+                            .checkbox(&mut include_same, "Include same-location duplicates")
+                            .clicked()
+                        {
+                            *self
+                                .app_state
+                                .find_duplicates_processing
+                                .include_same_location_duplicates
+                                .write()
+                                .unwrap() = include_same;
+                            self.app_state.set_setting(
+                                "include_same_location_duplicates",
+                                &include_same.to_string(),
+                            );
+                        }
+                    });
                 });
                 ui.separator();
                 {

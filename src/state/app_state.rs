@@ -59,6 +59,13 @@ impl AppState {
                 ON files(hash_256);",
             [],
         )?;
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );",
+            [],
+        )?;
         // Normalize legacy placeholder values to real SQL NULL
         connection.execute(
             "UPDATE files SET hash_256 = NULL WHERE hash_256 = 'NULL';",
@@ -126,6 +133,22 @@ impl AppState {
         }
 
         *self.sqlite.lock().unwrap().deref_mut() = Some(connection);
+
+        // Load settings
+        if let Some(min_size) = self.get_setting("min_file_size_input") {
+            *self.find_duplicates_processing.min_file_size_input.write().unwrap() = min_size;
+        }
+        if let Some(min_unit) = self.get_setting("min_file_size_unit") {
+            if let Ok(unit) = min_unit.parse() {
+                *self.find_duplicates_processing.min_file_size_unit.write().unwrap() = unit;
+            }
+        }
+        if let Some(include_same) = self.get_setting("include_same_location_duplicates") {
+            if let Ok(val) = include_same.parse() {
+                *self.find_duplicates_processing.include_same_location_duplicates.write().unwrap() = val;
+            }
+        }
+
         Ok(())
     }
 
@@ -203,6 +226,26 @@ impl AppState {
 
     pub fn is_sqlite_connected(&self) -> bool {
         self.sqlite.lock().unwrap().is_some()
+    }
+
+    pub fn get_setting(&self, key: &str) -> Option<String> {
+        self.with_sqlite_conn(|conn| {
+            conn.query_row(
+                "SELECT value FROM settings WHERE key = ?1;",
+                [key],
+                |row| row.get(0),
+            )
+        })
+    }
+
+    pub fn set_setting(&self, key: &str, value: &str) {
+        let _ = self.with_sqlite_conn(|conn| {
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2) \
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value;",
+                rusqlite::params![key, value],
+            )
+        });
     }
 
     pub fn remove_location(&self, persist_to_db: bool, location_path: &str) {
