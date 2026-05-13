@@ -194,16 +194,20 @@ impl AppState {
 
     pub fn calculate_file_hash(&self, file_path: &str) -> Option<String> {
         // Check if this file has an existing hash in DB
-        let hash: Option<String> = self.with_sqlite_conn(|conn| {
-            conn.query_row(
-                "SELECT hash_256 FROM files WHERE path = ?1;",
-                [file_path],
-                |x| x.get(0),
-            )
+        let hash: Option<Option<String>> = self.with_sqlite_conn(|conn| {
+            let mut stmt = conn.prepare_cached("SELECT hash_256 FROM files WHERE path = ?1;")?;
+            let res = stmt.query_row([file_path], |row| row.get::<_, Option<String>>(0));
+            match res {
+                Ok(h) => Ok(Some(h)),
+                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                Err(e) => Err(e),
+            }
         })?;
 
         if let Some(existing_hash) = hash {
-            return Some(existing_hash);
+            if existing_hash.is_some() {
+                return existing_hash;
+            }
         }
 
         // Compute hash only when DB has SQL NULL
@@ -229,13 +233,16 @@ impl AppState {
     }
 
     pub fn get_setting(&self, key: &str) -> Option<String> {
-        self.with_sqlite_conn(|conn| {
-            conn.query_row(
-                "SELECT value FROM settings WHERE key = ?1;",
-                [key],
-                |row| row.get(0),
-            )
-        })
+        let res: Option<Option<String>> = self.with_sqlite_conn(|conn| {
+            let mut stmt = conn.prepare_cached("SELECT value FROM settings WHERE key = ?1;")?;
+            let res = stmt.query_row([key], |row| row.get(0));
+            match res {
+                Ok(val) => Ok(Some(val)),
+                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                Err(e) => Err(e),
+            }
+        });
+        res.flatten()
     }
 
     pub fn set_setting(&self, key: &str, value: &str) {
@@ -378,19 +385,18 @@ impl AppState {
 
         if persist_to_db {
             let file_hash = file.hash.clone();
-            if let Some((_, existing_location)) = {
-                self.sqlite
-                    .lock()
-                    .unwrap()
-                    .as_ref()
-                    .unwrap()
-                    .query_row(
-                        "SELECT path, location_path FROM files WHERE path = ?1;",
-                        [file_path],
-                        |x| Ok((x.get::<_, String>(0)?.to_string(), x.get::<_, String>(1)?)),
-                    )
-                    .ok()
-            } {
+            if let Some(Some((_, existing_location))) = self.with_sqlite_conn(|conn| {
+                let mut stmt =
+                    conn.prepare_cached("SELECT path, location_path FROM files WHERE path = ?1;")?;
+                let res = stmt.query_row([file_path], |x| {
+                    Ok((x.get::<_, String>(0)?.to_string(), x.get::<_, String>(1)?))
+                });
+                match res {
+                    Ok(val) => Ok(Some(val)),
+                    Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                    Err(e) => Err(e),
+                }
+            }) {
                 if existing_location != location_path {
                     self.remove_file(true, false, file_path);
                 }
