@@ -7,7 +7,7 @@ use crate::utils::locks::{lock_rw_read_or_exit, lock_rw_write_or_exit};
 use crate::utils::size_unit::SizeUnit;
 use egui::ahash::HashMap;
 use std::ops::DerefMut;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
 
 pub struct FindDuplicatesState {
@@ -107,6 +107,7 @@ fn hash_potential_duplicates(
     }
 
     let nr_total = files_to_hash.len();
+    let total_bytes: u64 = files_to_hash.iter().map(|(size, _)| *size).sum();
     if nr_total == 0 {
         return Some(HashMap::default());
     }
@@ -115,6 +116,7 @@ fn hash_potential_duplicates(
         .map(|n| n.get())
         .unwrap_or(4);
     let hashed_count = Arc::new(AtomicUsize::new(0));
+    let hashed_bytes = Arc::new(AtomicU64::new(0));
     let mut threads = Vec::new();
     // Sort ascending so pop() takes the largest files first for better workload balancing
     files_to_hash.sort_by_key(|(size, _)| *size);
@@ -124,6 +126,7 @@ fn hash_potential_duplicates(
         let app_state = app_state.clone();
         let files_by_size_by_hash = files_by_size_by_hash.clone();
         let hashed_count = hashed_count.clone();
+        let hashed_bytes = hashed_bytes.clone();
         let tasks = tasks.clone();
         threads.push(std::thread::spawn(move || loop {
             let task = {
@@ -137,17 +140,32 @@ fn hash_potential_duplicates(
             };
 
             let current = hashed_count.fetch_add(1, Ordering::SeqCst);
-            if current % 10 == 0 {
-                set_processing_message(
-                    &app_state,
-                    format!(
-                        "{:.2}% | Hashing file {}/{}",
-                        (current + 1) as f64 * 100.0 / nr_total as f64,
-                        current + 1,
-                        nr_total
-                    ),
-                );
-            }
+            let current_bytes = hashed_bytes.fetch_add(size, Ordering::SeqCst) + size;
+
+            let total_gb = total_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+            let current_gb = current_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+
+            let progress_msg = if total_gb >= 1.0 {
+                format!(
+                    "{:.2}% | Hashing file {}/{} ({:.2}/{:.2} GB)",
+                    (current + 1) as f64 * 100.0 / nr_total as f64,
+                    current + 1,
+                    nr_total,
+                    current_gb,
+                    total_gb
+                )
+            } else {
+                format!(
+                    "{:.2}% | Hashing file {}/{} ({:.2}/{:.2} MB)",
+                    (current + 1) as f64 * 100.0 / nr_total as f64,
+                    current + 1,
+                    nr_total,
+                    current_bytes as f64 / (1024.0 * 1024.0),
+                    total_bytes as f64 / (1024.0 * 1024.0)
+                )
+            };
+
+            set_processing_message(&app_state, progress_msg);
             if let Some(hash) = app_state.calculate_file_hash(&file.path) {
                 file.hash = Some(hash.clone());
                 let size_entry = {
