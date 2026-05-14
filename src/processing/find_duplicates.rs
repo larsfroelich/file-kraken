@@ -6,10 +6,9 @@ use crate::utils::get_longest_parent_path;
 use crate::utils::locks::{lock_rw_read_or_exit, lock_rw_write_or_exit};
 use crate::utils::size_unit::SizeUnit;
 use egui::ahash::HashMap;
-use std::cmp::max;
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, RwLock, RwLockWriteGuard};
+use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
 
 pub struct FindDuplicatesState {
     pub duplicates: RwLock<Vec<FileKrakenDuplicate>>,
@@ -117,43 +116,52 @@ fn hash_potential_duplicates(
         .unwrap_or(4);
     let hashed_count = Arc::new(AtomicUsize::new(0));
     let mut threads = Vec::new();
+    // Sort ascending so pop() takes the largest files first for better workload balancing
+    files_to_hash.sort_by_key(|(size, _)| *size);
+    let tasks = Arc::new(Mutex::new(files_to_hash));
 
-    for chunk in files_to_hash
-        .chunks(max(1, nr_total / num_threads))
-        .map(|c| c.to_vec())
-    {
+    for _ in 0..num_threads {
         let app_state = app_state.clone();
         let files_by_size_by_hash = files_by_size_by_hash.clone();
         let hashed_count = hashed_count.clone();
-        threads.push(std::thread::spawn(move || {
-            for (size, mut file) in chunk {
-                let current = hashed_count.fetch_add(1, Ordering::SeqCst);
-                if current % 10 == 0 {
-                    set_processing_message(
-                        &app_state,
-                        format!(
-                            "{:.2}% | Hashing file {}/{}",
-                            current as f64 * 100.0 / nr_total as f64,
-                            current,
-                            nr_total
-                        ),
-                    );
-                }
-                if let Some(hash) = app_state.calculate_file_hash(&file.path) {
-                    file.hash = Some(hash.clone());
-                    let size_entry = {
-                        let mut map = files_by_size_by_hash.write().unwrap();
-                        map.entry(size)
-                            .or_insert_with(|| Arc::new(RwLock::new(HashMap::default())))
-                            .clone()
-                    };
-                    size_entry
-                        .write()
-                        .unwrap()
-                        .entry(hash)
-                        .or_insert(Vec::new())
-                        .push(file);
-                }
+        let tasks = tasks.clone();
+        threads.push(std::thread::spawn(move || loop {
+            let task = {
+                let mut tasks_lock = tasks.lock().unwrap();
+                tasks_lock.pop()
+            };
+
+            let (size, mut file) = match task {
+                Some(t) => t,
+                None => break,
+            };
+
+            let current = hashed_count.fetch_add(1, Ordering::SeqCst);
+            if current % 10 == 0 {
+                set_processing_message(
+                    &app_state,
+                    format!(
+                        "{:.2}% | Hashing file {}/{}",
+                        (current + 1) as f64 * 100.0 / nr_total as f64,
+                        current + 1,
+                        nr_total
+                    ),
+                );
+            }
+            if let Some(hash) = app_state.calculate_file_hash(&file.path) {
+                file.hash = Some(hash.clone());
+                let size_entry = {
+                    let mut map = files_by_size_by_hash.write().unwrap();
+                    map.entry(size)
+                        .or_insert_with(|| Arc::new(RwLock::new(HashMap::default())))
+                        .clone()
+                };
+                size_entry
+                    .write()
+                    .unwrap()
+                    .entry(hash)
+                    .or_insert(Vec::new())
+                    .push(file);
             }
         }));
     }
