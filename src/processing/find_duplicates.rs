@@ -145,10 +145,11 @@ fn hash_potential_duplicates(
             let total_gb = total_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
             let current_gb = current_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
 
+            let progress_pct = current_bytes as f64 * 100.0 / total_bytes as f64;
             let progress_msg = if total_gb >= 1.0 {
                 format!(
                     "{:.2}% | Hashing file {}/{} ({:.2}/{:.2} GB)",
-                    (current + 1) as f64 * 100.0 / nr_total as f64,
+                    progress_pct,
                     current + 1,
                     nr_total,
                     current_gb,
@@ -157,7 +158,7 @@ fn hash_potential_duplicates(
             } else {
                 format!(
                     "{:.2}% | Hashing file {}/{} ({:.2}/{:.2} MB)",
-                    (current + 1) as f64 * 100.0 / nr_total as f64,
+                    progress_pct,
                     current + 1,
                     nr_total,
                     current_bytes as f64 / (1024.0 * 1024.0),
