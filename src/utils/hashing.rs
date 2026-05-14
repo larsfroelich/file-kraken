@@ -10,7 +10,7 @@ pub fn hash_file(file_path: &str) -> io::Result<String> {
 
     let mut hasher = Sha256::new();
     let mut file = fs::File::open(file_path)?;
-    let mut buffer = vec![0; 4 * 1024 * 1024]; // 4MB buffer
+    let mut buffer = vec![0; 8 * 1024 * 1024]; // 8MB buffer
 
     loop {
         let count = file.read(&mut buffer)?;
