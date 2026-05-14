@@ -29,8 +29,7 @@ impl FileKrakenApp {
             colored_box(ui, Color32::TRANSPARENT, egui::Stroke::NONE, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Status: ");
-                    let state = self.app_state.find_duplicates_processing.state.read().unwrap();
-                    match state.deref() {
+                    match self.app_state.find_duplicates_processing.state.read().unwrap().deref() {
                         FindDuplicatesStateType::None => {
                             ui.label("Idle");
                             if ui.button("Find Duplicates").clicked() {
@@ -59,7 +58,10 @@ impl FileKrakenApp {
                         }
                     }
 
-                    let is_processing = matches!(*state, FindDuplicatesStateType::Processing(_));
+                    let is_processing = matches!(
+                        *self.app_state.find_duplicates_processing.state.read().unwrap(),
+                        FindDuplicatesStateType::Processing(_)
+                    );
                     ui.add_enabled_ui(!is_processing, |ui| {
                         ui.add_space(20.0);
                         ui.label("Min file size:");

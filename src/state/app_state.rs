@@ -4,6 +4,7 @@ use crate::state::location::{FileKrakenLocation, FileKrakenLocationState, FileKr
 use crate::utils::dialogs::error_dialog;
 use crate::utils::get_longest_parent_path;
 use crate::utils::hashing::hash_file;
+use rusqlite::OptionalExtension;
 use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard};
@@ -194,20 +195,14 @@ impl AppState {
 
     pub fn calculate_file_hash(&self, file_path: &str) -> Option<String> {
         // Check if this file has an existing hash in DB
-        let hash: Option<Option<String>> = self.with_sqlite_conn(|conn| {
-            let mut stmt = conn.prepare_cached("SELECT hash_256 FROM files WHERE path = ?1;")?;
-            let res = stmt.query_row([file_path], |row| row.get::<_, Option<String>>(0));
-            match res {
-                Ok(h) => Ok(Some(h)),
-                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-                Err(e) => Err(e),
-            }
-        })?;
+        let hash_result = self.with_sqlite_conn(|conn| {
+            conn.prepare_cached("SELECT hash_256 FROM files WHERE path = ?1;")?
+                .query_row([file_path], |row| row.get::<_, Option<String>>(0))
+                .optional()
+        });
 
-        if let Some(existing_hash) = hash {
-            if existing_hash.is_some() {
-                return existing_hash;
-            }
+        if let Some(Some(Some(existing_hash))) = hash_result {
+            return Some(existing_hash);
         }
 
         // Compute hash only when DB has SQL NULL
@@ -233,26 +228,28 @@ impl AppState {
     }
 
     pub fn get_setting(&self, key: &str) -> Option<String> {
-        let res: Option<Option<String>> = self.with_sqlite_conn(|conn| {
-            let mut stmt = conn.prepare_cached("SELECT value FROM settings WHERE key = ?1;")?;
-            let res = stmt.query_row([key], |row| row.get(0));
-            match res {
-                Ok(val) => Ok(Some(val)),
-                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-                Err(e) => Err(e),
-            }
-        });
-        res.flatten()
+        self.with_sqlite_conn(|conn| {
+            conn.prepare_cached("SELECT value FROM settings WHERE key = ?1;")?
+                .query_row([key], |row| row.get(0))
+                .optional()
+        })
+        .flatten()
     }
 
     pub fn set_setting(&self, key: &str, value: &str) {
-        let _ = self.with_sqlite_conn(|conn| {
+        let res = self.with_sqlite_conn(|conn| {
             conn.execute(
                 "INSERT INTO settings (key, value) VALUES (?1, ?2) \
                  ON CONFLICT(key) DO UPDATE SET value = excluded.value;",
                 rusqlite::params![key, value],
             )
         });
+        if res.is_none() {
+            // with_sqlite_conn already shows an error dialog and closes the project
+            // but we panic here to make sure we don't continue in a broken state if called from a background thread
+            // that doesn't respect the project closing.
+            log::error!("Failed to persist setting {}={}", key, value);
+        }
     }
 
     pub fn remove_location(&self, persist_to_db: bool, location_path: &str) {
@@ -386,16 +383,11 @@ impl AppState {
         if persist_to_db {
             let file_hash = file.hash.clone();
             if let Some(Some((_, existing_location))) = self.with_sqlite_conn(|conn| {
-                let mut stmt =
-                    conn.prepare_cached("SELECT path, location_path FROM files WHERE path = ?1;")?;
-                let res = stmt.query_row([file_path], |x| {
-                    Ok((x.get::<_, String>(0)?.to_string(), x.get::<_, String>(1)?))
-                });
-                match res {
-                    Ok(val) => Ok(Some(val)),
-                    Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-                    Err(e) => Err(e),
-                }
+                conn.prepare_cached("SELECT path, location_path FROM files WHERE path = ?1;")?
+                    .query_row([file_path], |x| {
+                        Ok((x.get::<_, String>(0)?.to_string(), x.get::<_, String>(1)?))
+                    })
+                    .optional()
             }) {
                 if existing_location != location_path {
                     self.remove_file(true, false, file_path);

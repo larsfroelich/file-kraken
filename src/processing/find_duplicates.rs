@@ -343,7 +343,7 @@ fn find_duplicate_file_sizes(app_state: &Arc<AppState>) -> Option<Vec<u64>> {
             conn.prepare(
                 "SELECT file_len, COUNT(*) c FROM files f \
                  WHERE file_len >= ?1 \
-                 GROUP BY file_len HAVING c > 1 AND (SELECT COUNT(DISTINCT location_path) FROM files f2 WHERE f2.file_len = f.file_len) > 1",
+                 GROUP BY file_len HAVING c > 1 AND COUNT(DISTINCT location_path) > 1",
             )?
         };
 
