@@ -249,6 +249,7 @@ impl AppState {
             // but we panic here to make sure we don't continue in a broken state if called from a background thread
             // that doesn't respect the project closing.
             log::error!("Failed to persist setting {}={}", key, value);
+            panic!("Failed to persist setting {}={}", key, value);
         }
     }
 
