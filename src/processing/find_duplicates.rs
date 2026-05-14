@@ -6,9 +6,9 @@ use crate::utils::get_longest_parent_path;
 use crate::utils::locks::{lock_rw_read_or_exit, lock_rw_write_or_exit};
 use crate::utils::size_unit::SizeUnit;
 use egui::ahash::HashMap;
-use std::cmp::max;
 use std::ops::DerefMut;
-use std::sync::{Arc, RwLock, RwLockWriteGuard};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
 
 pub struct FindDuplicatesState {
     pub duplicates: RwLock<Vec<FileKrakenDuplicate>>,
@@ -94,70 +94,93 @@ type FilesBySizeByHash = HashMap<u64, Arc<RwLock<HashMap<String, Vec<FileKrakenF
 
 fn hash_potential_duplicates(
     app_state: Arc<AppState>,
-    mut duplicate_file_sizes: Vec<u64>,
+    duplicate_file_sizes: Vec<u64>,
 ) -> Option<FilesBySizeByHash> {
     let files_by_size_by_hash = Arc::new(RwLock::new(HashMap::default()));
-    let mut threads = Vec::new();
-    let nr_total_sizes_to_check = duplicate_file_sizes.len();
-    let chunk_size = nr_total_sizes_to_check / 16;
-    let sizes_checked_so_far = Arc::new(RwLock::new(0f64));
+    let mut files_to_hash = Vec::new();
+    for size in duplicate_file_sizes {
+        if let Some(files) = get_files_by_size(&app_state, size) {
+            for file in files {
+                files_to_hash.push((size, file));
+            }
+        }
+    }
 
-    for duplicate_file_size_chunk in duplicate_file_sizes
-        .chunks_mut(max(1, chunk_size))
-        .map(|x| x.to_owned())
-    {
+    let nr_total = files_to_hash.len();
+    let total_bytes: u64 = files_to_hash.iter().map(|(size, _)| *size).sum();
+    if nr_total == 0 {
+        return Some(HashMap::default());
+    }
+
+    let num_threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+    let hashed_count = Arc::new(AtomicUsize::new(0));
+    let hashed_bytes = Arc::new(AtomicU64::new(0));
+    let mut threads = Vec::new();
+    // Sort ascending so pop() takes the largest files first for better workload balancing
+    files_to_hash.sort_by_key(|(size, _)| *size);
+    let tasks = Arc::new(Mutex::new(files_to_hash));
+
+    for _ in 0..num_threads {
         let app_state = app_state.clone();
         let files_by_size_by_hash = files_by_size_by_hash.clone();
-        let nr_total_sizes_to_check = nr_total_sizes_to_check as f64;
-        let sizes_checked_so_far = sizes_checked_so_far.clone();
-        threads.push(std::thread::spawn(move || {
-            for duplicate_file_size in duplicate_file_size_chunk {
-                let Some(mut files_by_size) = get_files_by_size(&app_state, duplicate_file_size)
-                else {
-                    continue;
-                };
-                let nr_files_by_size = files_by_size.len();
-                set_processing_message(
-                    &app_state,
-                    format!(
-                        "{:.2}% | Calculating hashes for {} files of size {}",
-                        *sizes_checked_so_far.read().unwrap() * 100.0 / nr_total_sizes_to_check,
-                        nr_files_by_size,
-                        duplicate_file_size
-                    ),
-                );
-                let mut hashing_threads = Vec::new();
-                for files in files_by_size
-                    .chunks_mut(max(1, nr_files_by_size / 4))
-                    .map(|x| x.to_owned())
-                {
-                    let files_by_size_by_hash = files_by_size_by_hash
-                        .write()
-                        .unwrap()
-                        .entry(duplicate_file_size)
+        let hashed_count = hashed_count.clone();
+        let hashed_bytes = hashed_bytes.clone();
+        let tasks = tasks.clone();
+        threads.push(std::thread::spawn(move || loop {
+            let task = {
+                let mut tasks_lock = tasks.lock().unwrap();
+                tasks_lock.pop()
+            };
+
+            let (size, mut file) = match task {
+                Some(t) => t,
+                None => break,
+            };
+
+            let current = hashed_count.fetch_add(1, Ordering::SeqCst);
+            let current_bytes = hashed_bytes.fetch_add(size, Ordering::SeqCst) + size;
+
+            let total_gb = total_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+            let current_gb = current_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+
+            let progress_pct = current_bytes as f64 * 100.0 / total_bytes as f64;
+            let progress_msg = if total_gb >= 1.0 {
+                format!(
+                    "{:.2}% | Hashing file {}/{} ({:.2}/{:.2} GB)",
+                    progress_pct,
+                    current + 1,
+                    nr_total,
+                    current_gb,
+                    total_gb
+                )
+            } else {
+                format!(
+                    "{:.2}% | Hashing file {}/{} ({:.2}/{:.2} MB)",
+                    progress_pct,
+                    current + 1,
+                    nr_total,
+                    current_bytes as f64 / (1024.0 * 1024.0),
+                    total_bytes as f64 / (1024.0 * 1024.0)
+                )
+            };
+
+            set_processing_message(&app_state, progress_msg);
+            if let Some(hash) = app_state.calculate_file_hash(&file.path) {
+                file.hash = Some(hash.clone());
+                let size_entry = {
+                    let mut map = files_by_size_by_hash.write().unwrap();
+                    map.entry(size)
                         .or_insert_with(|| Arc::new(RwLock::new(HashMap::default())))
-                        .clone();
-                    let _app_state = app_state.clone();
-                    hashing_threads.push(std::thread::spawn(move || {
-                        for mut file in files {
-                            if let Some(hash) = _app_state.calculate_file_hash(&file.path) {
-                                file.hash = Some(hash.clone());
-                                files_by_size_by_hash
-                                    .write()
-                                    .unwrap()
-                                    .entry(hash)
-                                    .or_insert(Vec::new())
-                                    .push(file.clone());
-                            }
-                        }
-                    }));
-                }
-                for thread in hashing_threads {
-                    if let Err(err) = thread.join() {
-                        log::error!("Hashing thread panicked: {:?}", err);
-                    }
-                }
-                *sizes_checked_so_far.write().unwrap() += 1.0;
+                        .clone()
+                };
+                size_entry
+                    .write()
+                    .unwrap()
+                    .entry(hash)
+                    .or_insert(Vec::new())
+                    .push(file);
             }
         }));
     }

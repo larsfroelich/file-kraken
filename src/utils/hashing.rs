@@ -6,9 +6,19 @@ use std::{fs, io};
 /// Instead of panicking on IO errors, this function now
 /// returns a `Result` so callers can react appropriately.
 pub fn hash_file(file_path: &str) -> io::Result<String> {
+    use std::io::Read;
+
     let mut hasher = Sha256::new();
     let mut file = fs::File::open(file_path)?;
-    io::copy(&mut file, &mut hasher)?;
+    let mut buffer = vec![0; 8 * 1024 * 1024]; // 8MB buffer
+
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
 
     Ok(format!("{:X}", hasher.finalize()))
 }
