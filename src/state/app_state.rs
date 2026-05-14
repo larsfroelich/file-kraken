@@ -4,6 +4,7 @@ use crate::state::location::{FileKrakenLocation, FileKrakenLocationState, FileKr
 use crate::utils::dialogs::error_dialog;
 use crate::utils::get_longest_parent_path;
 use crate::utils::hashing::hash_file;
+use rusqlite::OptionalExtension;
 use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard};
@@ -57,6 +58,13 @@ impl AppState {
         connection.execute(
             "CREATE INDEX IF NOT EXISTS file_hash_index
                 ON files(hash_256);",
+            [],
+        )?;
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );",
             [],
         )?;
         // Normalize legacy placeholder values to real SQL NULL
@@ -126,6 +134,22 @@ impl AppState {
         }
 
         *self.sqlite.lock().unwrap().deref_mut() = Some(connection);
+
+        // Load settings
+        if let Some(min_size) = self.get_setting("min_file_size_input") {
+            *self.find_duplicates_processing.min_file_size_input.write().unwrap() = min_size;
+        }
+        if let Some(min_unit) = self.get_setting("min_file_size_unit") {
+            if let Ok(unit) = min_unit.parse() {
+                *self.find_duplicates_processing.min_file_size_unit.write().unwrap() = unit;
+            }
+        }
+        if let Some(include_same) = self.get_setting("include_same_location_duplicates") {
+            if let Ok(val) = include_same.parse() {
+                *self.find_duplicates_processing.include_same_location_duplicates.write().unwrap() = val;
+            }
+        }
+
         Ok(())
     }
 
@@ -171,15 +195,13 @@ impl AppState {
 
     pub fn calculate_file_hash(&self, file_path: &str) -> Option<String> {
         // Check if this file has an existing hash in DB
-        let hash: Option<String> = self.with_sqlite_conn(|conn| {
-            conn.query_row(
-                "SELECT hash_256 FROM files WHERE path = ?1;",
-                [file_path],
-                |x| x.get(0),
-            )
-        })?;
+        let hash_result = self.with_sqlite_conn(|conn| {
+            conn.prepare_cached("SELECT hash_256 FROM files WHERE path = ?1;")?
+                .query_row([file_path], |row| row.get::<_, Option<String>>(0))
+                .optional()
+        });
 
-        if let Some(existing_hash) = hash {
+        if let Some(Some(Some(existing_hash))) = hash_result {
             return Some(existing_hash);
         }
 
@@ -203,6 +225,32 @@ impl AppState {
 
     pub fn is_sqlite_connected(&self) -> bool {
         self.sqlite.lock().unwrap().is_some()
+    }
+
+    pub fn get_setting(&self, key: &str) -> Option<String> {
+        self.with_sqlite_conn(|conn| {
+            conn.prepare_cached("SELECT value FROM settings WHERE key = ?1;")?
+                .query_row([key], |row| row.get(0))
+                .optional()
+        })
+        .flatten()
+    }
+
+    pub fn set_setting(&self, key: &str, value: &str) {
+        let res = self.with_sqlite_conn(|conn| {
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2) \
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value;",
+                rusqlite::params![key, value],
+            )
+        });
+        if res.is_none() {
+            // with_sqlite_conn already shows an error dialog and closes the project
+            // but we panic here to make sure we don't continue in a broken state if called from a background thread
+            // that doesn't respect the project closing.
+            log::error!("Failed to persist setting {}={}", key, value);
+            panic!("Failed to persist setting {}={}", key, value);
+        }
     }
 
     pub fn remove_location(&self, persist_to_db: bool, location_path: &str) {
@@ -335,19 +383,13 @@ impl AppState {
 
         if persist_to_db {
             let file_hash = file.hash.clone();
-            if let Some((_, existing_location)) = {
-                self.sqlite
-                    .lock()
-                    .unwrap()
-                    .as_ref()
-                    .unwrap()
-                    .query_row(
-                        "SELECT path, location_path FROM files WHERE path = ?1;",
-                        [file_path],
-                        |x| Ok((x.get::<_, String>(0)?.to_string(), x.get::<_, String>(1)?)),
-                    )
-                    .ok()
-            } {
+            if let Some(Some((_, existing_location))) = self.with_sqlite_conn(|conn| {
+                conn.prepare_cached("SELECT path, location_path FROM files WHERE path = ?1;")?
+                    .query_row([file_path], |x| {
+                        Ok((x.get::<_, String>(0)?.to_string(), x.get::<_, String>(1)?))
+                    })
+                    .optional()
+            }) {
                 if existing_location != location_path {
                     self.remove_file(true, false, file_path);
                 }
