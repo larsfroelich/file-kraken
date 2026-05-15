@@ -115,8 +115,8 @@ fn hash_potential_duplicates(
     let num_threads = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(4);
-    let hashed_count = Arc::new(AtomicUsize::new(0));
-    let hashed_bytes = Arc::new(AtomicU64::new(0));
+    let started_count = Arc::new(AtomicUsize::new(0));
+    let completed_bytes = Arc::new(AtomicU64::new(0));
     let mut threads = Vec::new();
     // Sort ascending so pop() takes the largest files first for better workload balancing
     files_to_hash.sort_by_key(|(size, _)| *size);
@@ -125,8 +125,8 @@ fn hash_potential_duplicates(
     for _ in 0..num_threads {
         let app_state = app_state.clone();
         let files_by_size_by_hash = files_by_size_by_hash.clone();
-        let hashed_count = hashed_count.clone();
-        let hashed_bytes = hashed_bytes.clone();
+        let started_count = started_count.clone();
+        let completed_bytes = completed_bytes.clone();
         let tasks = tasks.clone();
         threads.push(std::thread::spawn(move || loop {
             let task = {
@@ -139,34 +139,38 @@ fn hash_potential_duplicates(
                 None => break,
             };
 
-            let current = hashed_count.fetch_add(1, Ordering::SeqCst);
-            let current_bytes = hashed_bytes.fetch_add(size, Ordering::SeqCst) + size;
+            let current_started = started_count.fetch_add(1, Ordering::SeqCst) + 1;
 
-            let total_gb = total_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
-            let current_gb = current_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+            let update_progress =
+                |app_state: &Arc<AppState>, completed_bytes: u64, started_idx: usize| {
+                    let total_gb = total_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+                    let completed_gb = completed_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
 
-            let progress_pct = current_bytes as f64 * 100.0 / total_bytes as f64;
-            let progress_msg = if total_gb >= 1.0 {
-                format!(
-                    "{:.2}% | Hashing file {}/{} ({:.2}/{:.2} GB)",
-                    progress_pct,
-                    current + 1,
-                    nr_total,
-                    current_gb,
-                    total_gb
-                )
-            } else {
-                format!(
-                    "{:.2}% | Hashing file {}/{} ({:.2}/{:.2} MB)",
-                    progress_pct,
-                    current + 1,
-                    nr_total,
-                    current_bytes as f64 / (1024.0 * 1024.0),
-                    total_bytes as f64 / (1024.0 * 1024.0)
-                )
-            };
+                    let progress_pct = completed_bytes as f64 * 100.0 / total_bytes as f64;
+                    let progress_msg = if total_gb >= 1.0 {
+                        format!(
+                            "{:.2}% | Hashing file {}/{} ({:.2}/{:.2} GB)",
+                            progress_pct, started_idx, nr_total, completed_gb, total_gb
+                        )
+                    } else {
+                        format!(
+                            "{:.2}% | Hashing file {}/{} ({:.2}/{:.2} MB)",
+                            progress_pct,
+                            started_idx,
+                            nr_total,
+                            completed_bytes as f64 / (1024.0 * 1024.0),
+                            total_bytes as f64 / (1024.0 * 1024.0)
+                        )
+                    };
+                    set_processing_message(app_state, progress_msg);
+                };
 
-            set_processing_message(&app_state, progress_msg);
+            update_progress(
+                &app_state,
+                completed_bytes.load(Ordering::SeqCst),
+                current_started,
+            );
+
             if let Some(hash) = app_state.calculate_file_hash(&file.path) {
                 file.hash = Some(hash.clone());
                 let size_entry = {
@@ -182,6 +186,9 @@ fn hash_potential_duplicates(
                     .or_insert(Vec::new())
                     .push(file);
             }
+
+            let current_completed_bytes = completed_bytes.fetch_add(size, Ordering::SeqCst) + size;
+            update_progress(&app_state, current_completed_bytes, current_started);
         }));
     }
 

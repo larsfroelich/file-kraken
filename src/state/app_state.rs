@@ -137,16 +137,28 @@ impl AppState {
 
         // Load settings
         if let Some(min_size) = self.get_setting("min_file_size_input") {
-            *self.find_duplicates_processing.min_file_size_input.write().unwrap() = min_size;
+            *self
+                .find_duplicates_processing
+                .min_file_size_input
+                .write()
+                .unwrap() = min_size;
         }
         if let Some(min_unit) = self.get_setting("min_file_size_unit") {
             if let Ok(unit) = min_unit.parse() {
-                *self.find_duplicates_processing.min_file_size_unit.write().unwrap() = unit;
+                *self
+                    .find_duplicates_processing
+                    .min_file_size_unit
+                    .write()
+                    .unwrap() = unit;
             }
         }
         if let Some(include_same) = self.get_setting("include_same_location_duplicates") {
             if let Ok(val) = include_same.parse() {
-                *self.find_duplicates_processing.include_same_location_duplicates.write().unwrap() = val;
+                *self
+                    .find_duplicates_processing
+                    .include_same_location_duplicates
+                    .write()
+                    .unwrap() = val;
             }
         }
 
@@ -659,6 +671,7 @@ impl AppState {
             });
     }
 
+    #[cfg(test)]
     pub fn get_files_by_location(
         &self,
         location: &str,
