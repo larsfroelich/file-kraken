@@ -3,9 +3,9 @@ use crate::processing::find_duplicates::{
     delete_duplicate, find_file_duplicates, get_duplicates_processing_state,
     set_processing_message, FindDuplicatesStateType,
 };
-use crate::utils::size_unit::SizeUnit;
 use crate::state::duplicate::FileKrakenDuplicate;
 use crate::state::AppState;
+use crate::utils::size_unit::SizeUnit;
 use crate::utils::ui_elements::{colored_box, unselectable_label};
 use crate::FileKrakenApp;
 use egui::{Color32, RichText, Ui};
@@ -306,13 +306,13 @@ fn table_row(app_state: &Arc<AppState>, row: &mut TableRow, duplicate: &FileKrak
     };
 
     row.col(|ui| {
-        if duplicate.deletable_file.is_some() {
+        if let Some(deletable_file) = &duplicate.deletable_file {
             if ui.button("🗑️").clicked()
                 && rfd::MessageDialog::new()
                     .set_title("Delete file?")
                     .set_description(format!(
                         "Are you sure you want to delete the file \"{}\"?",
-                        duplicate.deletable_file.as_ref().unwrap().path
+                        deletable_file.path
                     ))
                     .set_buttons(rfd::MessageButtons::YesNo)
                     .show()
