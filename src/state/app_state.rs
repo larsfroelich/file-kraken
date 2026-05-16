@@ -365,6 +365,7 @@ impl AppState {
         )
     }
 
+    /// Adds a single file to a specific location and persists it to the database if required.
     #[allow(clippy::too_many_arguments)]
     pub fn add_file_to_location(
         &self,
@@ -391,6 +392,7 @@ impl AppState {
         );
     }
 
+    /// Adds multiple files to a location in bulk, using a single transaction for persistence.
     pub fn add_files_to_location(
         &self,
         persist_to_db: bool,
@@ -401,6 +403,7 @@ impl AppState {
             return;
         }
 
+        // --- SQL: Persist in bulk via transaction ---
         if persist_to_db {
             let res = self.sqlite_lock_or_exit().and_then(|mut guard| {
                 let conn = guard.as_mut().unwrap();
@@ -449,6 +452,7 @@ impl AppState {
             }
         }
 
+        // --- STATE: Update in-memory location metadata ---
         let location_state = self
             .get_location_clone(location_path)
             .map(|l| l.location_state);
@@ -460,6 +464,7 @@ impl AppState {
             );
         }
 
+        // --- STATE: Update in-memory file indexes ---
         let locations = self.get_locations_list_readonly();
         let files_by_location = self.files_by_location_by_path.read().unwrap();
         let location_files = files_by_location.get(location_path).cloned();
@@ -467,6 +472,7 @@ impl AppState {
         if let Some(location_files) = location_files {
             let mut writer = location_files.write().unwrap();
             for file in files {
+                // Ensure consistency by removing file from old location index if it changed
                 if let Some(old_loc_path) = get_longest_parent_path(&file.path, locations.iter()) {
                     if old_loc_path != location_path {
                         if let Some(old_loc_files) = files_by_location.get(&old_loc_path) {
@@ -479,11 +485,13 @@ impl AppState {
         }
     }
 
+    /// Removes multiple files from the database and memory in bulk.
     pub fn remove_files(&self, persist_to_db: bool, file_paths: &[String]) {
         if file_paths.is_empty() {
             return;
         }
 
+        // --- SQL: Remove in bulk via transaction ---
         if persist_to_db {
             let res = self.sqlite_lock_or_exit().and_then(|mut guard| {
                 let conn = guard.as_mut().unwrap();
@@ -505,6 +513,7 @@ impl AppState {
             }
         }
 
+        // --- STATE: Update in-memory file indexes ---
         let locations = self.get_locations_list_readonly();
         let files_by_location = self.files_by_location_by_path.read().unwrap();
 

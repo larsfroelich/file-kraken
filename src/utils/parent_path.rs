@@ -1,6 +1,7 @@
 use crate::state::location::FileKrakenLocation;
 use std::path::Path;
 
+/// Returns true if the `ancestor` path is a parent (or grandparent, etc.) of the `descendant` path.
 pub fn is_ancestor_of(ancestor: &str, descendant: &str) -> bool {
     let descendant_path = Path::new(descendant);
     let ancestor_path = Path::new(ancestor);
@@ -14,6 +15,7 @@ pub fn is_ancestor_of(ancestor: &str, descendant: &str) -> bool {
     false
 }
 
+/// Finds the longest (most specific) location path that contains the given child path.
 pub fn get_longest_parent_path<'a>(
     child: &str,
     parents: impl IntoIterator<Item = &'a FileKrakenLocation>,

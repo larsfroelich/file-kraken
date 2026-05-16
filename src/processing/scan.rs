@@ -8,13 +8,16 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
+/// Checks if the given path points to a known archive file type.
 fn is_archive_path(path: &Path) -> bool {
+    // Check extensions first for common types
     if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
         let ext = ext.to_lowercase();
         if ext == "zip" || ext == "7z" {
             return true;
         }
     }
+    // Check filename for double extensions like .tar.xz
     path.file_name()
         .and_then(|n| n.to_str())
         .map(|n| n.to_lowercase().ends_with(".tar.xz"))
@@ -25,6 +28,10 @@ use crate::state::file::FileKrakenFile;
 use crate::utils::parent_path::is_ancestor_of;
 use std::collections::{HashMap, HashSet};
 
+/// Scans a directory for files and updates the application state.
+///
+/// This function is optimized for network drives by using bulk updates
+/// and in-memory deletion tracking to minimize syscalls and database roundtrips.
 pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
     let current_location = match app_state.get_location_clone(location_path) {
         Some(loc) => loc,
@@ -37,6 +44,8 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
         return error_dialog("Already scanning this location");
     }
     app_state.modify_location_state(true, location_path, FileKrakenLocationState::Scanning);
+
+    // --- SETUP: Relevant locations and deletion tracking ---
 
     // identify descendant locations that might overlap
     let all_locations = app_state.get_locations_list_readonly();
@@ -60,6 +69,8 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
             all_existing_files.extend(files);
         }
     }
+
+    // --- PROCESSING: Walk directory and discover files ---
 
     let mut found_files_by_location: HashMap<String, Vec<FileKrakenFile>> = HashMap::new();
     let mut failed_paths = Vec::new();
@@ -125,12 +136,15 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
                 .or_default();
             batch.push(file);
 
+            // periodically flush batches to database and memory
             if batch.len() >= BATCH_SIZE {
                 let to_add = std::mem::take(batch);
                 app_state.add_files_to_location(true, target_location, to_add);
             }
         }
     }
+
+    // --- CLEANUP: Finalize state ---
 
     // flush remaining batches
     for (loc_path, batch) in found_files_by_location {
