@@ -3,6 +3,7 @@ name = "file-kraken"
 version = "1.0.16"
 edition = "2021"
 
+
 [dependencies]
 catppuccin-egui = { version = "5.2.0", default-features = false, features = ["egui28"] }
 eframe = { version= "0.28.1", default-features = false, features = ["wgpu", "x11", "wayland"] }

@@ -1,15 +1,15 @@
 use crate::state::location::FileKrakenLocation;
 use std::path::Path;
 
-pub fn is_path_parent(child: &str, parent: &str) -> bool {
-    let child_path = Path::new(child);
-    let parent_path = Path::new(parent);
-    let mut child_path = child_path.parent();
-    while let Some(path) = child_path {
-        if path == parent_path {
+pub fn is_ancestor_of(ancestor: &str, descendant: &str) -> bool {
+    let descendant_path = Path::new(descendant);
+    let ancestor_path = Path::new(ancestor);
+    let mut descendant_path = descendant_path.parent();
+    while let Some(path) = descendant_path {
+        if path == ancestor_path {
             return true;
         }
-        child_path = path.parent();
+        descendant_path = path.parent();
     }
     false
 }
@@ -21,7 +21,7 @@ pub fn get_longest_parent_path<'a>(
     let mut file_parent_location = String::default();
     // get locations containing this file
     parents.into_iter().for_each(|location| {
-        if is_path_parent(child, &location.path) && location.path.len() > file_parent_location.len()
+        if is_ancestor_of(&location.path, child) && location.path.len() > file_parent_location.len()
         {
             file_parent_location = location.path.clone();
         }
@@ -41,11 +41,11 @@ mod tests {
     };
 
     #[test]
-    fn test_is_path_parent_basic() {
-        assert!(is_path_parent("/foo/bar/baz.txt", "/foo"));
-        assert!(is_path_parent("/foo/bar/baz.txt", "/foo/bar"));
-        assert!(!is_path_parent("/foo/bar/baz.txt", "/fob"));
-        assert!(!is_path_parent("/foo/bar", "/foo/bar"));
+    fn test_is_ancestor_of_basic() {
+        assert!(is_ancestor_of("/foo", "/foo/bar/baz.txt"));
+        assert!(is_ancestor_of("/foo/bar", "/foo/bar/baz.txt"));
+        assert!(!is_ancestor_of("/fob", "/foo/bar/baz.txt"));
+        assert!(!is_ancestor_of("/foo/bar", "/foo/bar"));
     }
 
     #[test]

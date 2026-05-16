@@ -2,8 +2,8 @@ use crate::processing::find_duplicates::{FindDuplicatesState, FindDuplicatesStat
 use crate::state::file::{FileKrakenFile, FileKrakenFileType};
 use crate::state::location::{FileKrakenLocation, FileKrakenLocationState, FileKrakenLocationType};
 use crate::utils::dialogs::error_dialog;
-use crate::utils::get_longest_parent_path;
 use crate::utils::hashing::hash_file;
+use crate::utils::parent_path::get_longest_parent_path;
 use rusqlite::OptionalExtension;
 use std::collections::HashMap;
 use std::ops::DerefMut;
@@ -377,69 +377,82 @@ impl AppState {
         time_modified: u64,
         hash: Option<String>,
     ) {
-        let file = FileKrakenFile {
-            path: file_path.to_string(),
-            file_type: file_type.clone(),
-            file_len,
-            time_created,
-            time_modified,
-            hash,
-        };
-        log::trace!(
-            "adding file {:?} len {} created {} modified {}",
-            file.file_type,
-            file.file_len,
-            file.time_created,
-            file.time_modified
+        self.add_files_to_location(
+            persist_to_db,
+            location_path,
+            vec![FileKrakenFile {
+                path: file_path.to_string(),
+                file_type: file_type.clone(),
+                file_len,
+                time_created,
+                time_modified,
+                hash,
+            }],
         );
+    }
+
+    pub fn add_files_to_location(
+        &self,
+        persist_to_db: bool,
+        location_path: &str,
+        files: Vec<FileKrakenFile>,
+    ) {
+        if files.is_empty() {
+            return;
+        }
 
         if persist_to_db {
-            let file_hash = file.hash.clone();
-            if let Some(Some((_, existing_location))) = self.with_sqlite_conn(|conn| {
-                conn.prepare_cached("SELECT path, location_path FROM files WHERE path = ?1;")?
-                    .query_row([file_path], |x| {
-                        Ok((x.get::<_, String>(0)?.to_string(), x.get::<_, String>(1)?))
-                    })
-                    .optional()
-            }) {
-                if existing_location != location_path {
-                    self.remove_file(true, false, file_path);
-                }
-            }
+            let res = self.sqlite_lock_or_exit().and_then(|mut guard| {
+                let conn = guard.as_mut().unwrap();
+                let tx = conn.transaction().ok()?;
+                {
+                    let mut stmt = tx
+                        .prepare_cached(
+                            "INSERT INTO files (
+                                path,
+                                location_path,
+                                file_type,
+                                file_len,
+                                time_created,
+                                time_modified,
+                                hash_256
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                            ON CONFLICT(path) DO UPDATE SET
+                                location_path = excluded.location_path,
+                                file_type = excluded.file_type,
+                                file_len = excluded.file_len,
+                                time_created = excluded.time_created,
+                                time_modified = excluded.time_modified,
+                                hash_256 = NULL;",
+                        )
+                        .ok()?;
 
-            self.sqlite
-                .lock()
-                .unwrap()
-                .as_mut()
-                .unwrap()
-                .execute(
-                    "INSERT INTO files (\
-                    path, \
-                    location_path, \
-                    file_type,\
-                    file_len,\
-                    time_created,\
-                    time_modified,\
-                    hash_256\
-                ) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(path) DO NOTHING;",
-                    rusqlite::params![
-                        file_path,
-                        location_path,
-                        file_type.as_str(),
-                        file_len,
-                        time_created,
-                        time_modified,
-                        file_hash,
-                    ],
-                )
-                .unwrap();
+                    for file in &files {
+                        stmt.execute(rusqlite::params![
+                            file.path,
+                            location_path,
+                            file.file_type.as_str(),
+                            file.file_len,
+                            file.time_created,
+                            file.time_modified,
+                            file.hash,
+                        ])
+                        .ok()?;
+                    }
+                }
+                tx.commit().ok()
+            });
+            if res.is_none() {
+                error_dialog("Failed to save files to database. Closing project.");
+                self.close_project();
+                return;
+            }
         }
 
         let location_state = self
             .get_location_clone(location_path)
-            .unwrap()
-            .location_state;
-        if location_state == FileKrakenLocationState::Unscanned {
+            .map(|l| l.location_state);
+        if location_state == Some(FileKrakenLocationState::Unscanned) {
             self.modify_location_state(
                 persist_to_db,
                 location_path,
@@ -447,18 +460,62 @@ impl AppState {
             );
         }
 
-        let location_files = {
-            self.files_by_location_by_path
-                .read()
-                .unwrap()
-                .get(location_path)
-                .unwrap()
-                .clone()
-        };
-        location_files
-            .write()
-            .unwrap()
-            .insert(file_path.to_string(), file);
+        let locations = self.get_locations_list_readonly();
+        let files_by_location = self.files_by_location_by_path.read().unwrap();
+        let location_files = files_by_location.get(location_path).cloned();
+
+        if let Some(location_files) = location_files {
+            let mut writer = location_files.write().unwrap();
+            for file in files {
+                if let Some(old_loc_path) = get_longest_parent_path(&file.path, locations.iter()) {
+                    if old_loc_path != location_path {
+                        if let Some(old_loc_files) = files_by_location.get(&old_loc_path) {
+                            old_loc_files.write().unwrap().remove(&file.path);
+                        }
+                    }
+                }
+                writer.insert(file.path.clone(), file);
+            }
+        }
+    }
+
+    pub fn remove_files(&self, persist_to_db: bool, file_paths: &[String]) {
+        if file_paths.is_empty() {
+            return;
+        }
+
+        if persist_to_db {
+            let res = self.sqlite_lock_or_exit().and_then(|mut guard| {
+                let conn = guard.as_mut().unwrap();
+                let tx = conn.transaction().ok()?;
+                {
+                    let mut stmt = tx
+                        .prepare_cached("DELETE FROM files WHERE path = ?1")
+                        .ok()?;
+                    for path in file_paths {
+                        stmt.execute([path]).ok()?;
+                    }
+                }
+                tx.commit().ok()
+            });
+            if res.is_none() {
+                error_dialog("Failed to remove files from database. Closing project.");
+                self.close_project();
+                return;
+            }
+        }
+
+        let locations = self.get_locations_list_readonly();
+        let files_by_location = self.files_by_location_by_path.read().unwrap();
+
+        for file_path in file_paths {
+            if let Some(parent_location_path) = get_longest_parent_path(file_path, locations.iter())
+            {
+                if let Some(location_files) = files_by_location.get(&parent_location_path) {
+                    location_files.write().unwrap().remove(file_path);
+                }
+            }
+        }
     }
 
     pub fn get_location_clone(&self, location_path: &str) -> Option<FileKrakenLocation> {

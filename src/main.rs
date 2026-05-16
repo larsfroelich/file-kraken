@@ -1,11 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 #![allow(rustdoc::missing_crate_level_docs)] // it's an example
 
-mod app_init;
-mod processing;
-mod state;
-mod tabs;
-mod utils;
+pub mod app_init;
+pub mod processing;
+pub mod state;
+pub mod tabs;
+pub mod utils;
 
 use crate::app_init::app_init;
 use crate::tabs::tab_files::FileKrakenFileTabs;
