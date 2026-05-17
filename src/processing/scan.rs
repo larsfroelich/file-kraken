@@ -72,7 +72,7 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
 
     // --- PROCESSING: Walk directory and discover files ---
 
-    let mut found_files_by_location: HashMap<String, Vec<FileKrakenFile>> = HashMap::new();
+    let mut discovered_files_by_location: HashMap<String, Vec<FileKrakenFile>> = HashMap::new();
     let mut failed_paths = Vec::new();
 
     const BATCH_SIZE: usize = 1000;
@@ -131,7 +131,7 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
             // mark file as found in the global set
             all_existing_files.remove(&file_path);
 
-            let batch = found_files_by_location
+            let batch = discovered_files_by_location
                 .entry(target_location.clone())
                 .or_default();
             batch.push(file);
@@ -147,7 +147,7 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
     // --- CLEANUP: Finalize state ---
 
     // flush remaining batches
-    for (loc_path, batch) in found_files_by_location {
+    for (loc_path, batch) in discovered_files_by_location {
         if !batch.is_empty() {
             app_state.add_files_to_location(true, &loc_path, batch);
         }
