@@ -1,6 +1,6 @@
 use crate::state::duplicate::{FileKrakenDuplicate, FileKrakenDuplicateType};
 use crate::state::file::{FileKrakenFile, FileKrakenFileType};
-use crate::state::location::{FileKrakenLocation, FileKrakenLocationType};
+use crate::state::location::FileKrakenLocationType;
 use crate::state::AppState;
 use crate::utils::get_longest_parent_path;
 use crate::utils::locks::{lock_rw_read_or_exit, lock_rw_write_or_exit};
@@ -217,84 +217,61 @@ fn detect_hashed_duplicates(
                     app_state,
                 )?;
 
-                let deletable_file = get_deletable_file(app_state, files);
-                let other_files = if let Some(ref deletable) = deletable_file {
-                    files
-                        .iter()
-                        .filter(|x| x.path != deletable.path)
-                        .cloned()
-                        .collect()
+                let (preferred_files, normal_files) = {
+                    let locations = app_state.get_locations_list_readonly();
+                    let mut preferred = Vec::new();
+                    let mut normal = Vec::new();
+
+                    for file in files {
+                        let location_type = get_longest_parent_path(&file.path, locations.iter())
+                            .and_then(|p| locations.iter().find(|loc| loc.path == p))
+                            .map(|loc| loc.location_type.clone())
+                            .unwrap_or(FileKrakenLocationType::Normal);
+
+                        if location_type == FileKrakenLocationType::Preferred {
+                            preferred.push(file.clone());
+                        } else {
+                            normal.push(file.clone());
+                        }
+                    }
+                    (preferred, normal)
+                };
+
+                if !preferred_files.is_empty() {
+                    let reference = preferred_files[0].clone();
+
+                    // Rows for other preferred files
+                    for other_preferred in preferred_files.iter().skip(1) {
+                        duplicates_list.push(FileKrakenDuplicate {
+                            deletable_file: None,
+                            other_files: vec![reference.clone(), other_preferred.clone()],
+                            duplicate_type: FileKrakenDuplicateType::ExactMatch,
+                        });
+                    }
+
+                    // Rows for normal files (deletable)
+                    for normal in &normal_files {
+                        duplicates_list.push(FileKrakenDuplicate {
+                            deletable_file: Some(normal.clone()),
+                            other_files: vec![reference.clone()],
+                            duplicate_type: FileKrakenDuplicateType::ExactMatch,
+                        });
+                    }
                 } else {
-                    files.clone()
-                };
-                let duplicate = FileKrakenDuplicate {
-                    other_files,
-                    deletable_file,
-                    duplicate_type: FileKrakenDuplicateType::ExactMatch,
-                };
-                log::trace!(
-                    "found duplicate type {:?} size {}",
-                    duplicate.duplicate_type,
-                    duplicate
-                        .deletable_file
-                        .as_ref()
-                        .or_else(|| duplicate.other_files.first())
-                        .map(|f| f.file_len)
-                        .unwrap_or(0)
-                );
-                duplicates_list.push(duplicate);
+                    // No preferred files, use first normal as reference
+                    let reference = normal_files[0].clone();
+                    for other_normal in normal_files.iter().skip(1) {
+                        duplicates_list.push(FileKrakenDuplicate {
+                            deletable_file: None,
+                            other_files: vec![reference.clone(), other_normal.clone()],
+                            duplicate_type: FileKrakenDuplicateType::ExactMatch,
+                        });
+                    }
+                }
             }
         }
     }
     Some(())
-}
-
-fn get_deletable_file(
-    app_state: &Arc<AppState>,
-    files: &[FileKrakenFile],
-) -> Option<FileKrakenFile> {
-    let (preferred_file, normal_file) = {
-        let file_locations: Vec<(FileKrakenFile, Option<FileKrakenLocation>)> = {
-            let locations = app_state.get_locations_list_readonly();
-            files
-                .iter()
-                .map(|file| {
-                    (
-                        file.clone(),
-                        get_longest_parent_path(&file.path, locations.iter())
-                            .and_then(|p| locations.iter().find(|loc| loc.path == p).cloned()),
-                    )
-                })
-                .collect()
-        };
-
-        (
-            file_locations
-                .iter()
-                .filter(|(_, location)| location.is_some())
-                .find(|(_, location)| {
-                    location
-                        .as_ref()
-                        .is_some_and(|loc| loc.location_type == FileKrakenLocationType::Preferred)
-                })
-                .map(|(file, _)| file.clone()),
-            file_locations
-                .iter()
-                .filter(|(_, location)| location.is_some())
-                .find(|(_, location)| {
-                    location
-                        .as_ref()
-                        .is_some_and(|loc| loc.location_type == FileKrakenLocationType::Normal)
-                })
-                .map(|(file, _)| file.clone()),
-        )
-    };
-
-    if preferred_file.is_some() && normal_file.is_some() {
-        normal_file
-    } else {
-        None
-    }
 }
 
 fn get_files_by_size(app_state: &Arc<AppState>, size: u64) -> Option<Vec<FileKrakenFile>> {

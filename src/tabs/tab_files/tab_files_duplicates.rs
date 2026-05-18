@@ -259,10 +259,10 @@ impl FileKrakenApp {
                                     ui.label(RichText::new(" ").strong());
                                 });
                                 row.col(|ui| {
-                                    ui.label(RichText::new("Location path 1").strong());
+                                    ui.label(RichText::new("Location 1").strong());
                                 });
                                 row.col(|ui| {
-                                    ui.label(RichText::new("Location path 2").strong());
+                                    ui.label(RichText::new("Location 2").strong());
                                 });
                                 row.col(|ui| {
                                     ui.label(RichText::new("Type").strong());
