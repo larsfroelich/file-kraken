@@ -48,12 +48,17 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
     // --- SETUP: Relevant locations and deletion tracking ---
 
     // identify descendant locations that might overlap
-    let all_locations = app_state.get_locations_list_readonly();
-    let mut relevant_locations: Vec<_> = all_locations
-        .iter()
-        .filter(|l| l.path == location_path || is_ancestor_of(location_path, &l.path))
-        .cloned()
-        .collect();
+    let mut relevant_locations: Vec<_> = {
+        // NOTE: we scope the read lock to this block to avoid deadlocks.
+        // Subsequent calls (like add_files_to_location) may need a write lock
+        // on the same locations list.
+        let all_locations = app_state.get_locations_list_readonly();
+        all_locations
+            .iter()
+            .filter(|l| l.path == location_path || is_ancestor_of(location_path, &l.path))
+            .cloned()
+            .collect()
+    };
     // sort by path length descending so the longest match is found first
     relevant_locations.sort_by_key(|l| std::cmp::Reverse(l.path.len()));
 
@@ -205,7 +210,8 @@ mod tests {
         fs::write(&root_file, "root").unwrap();
         fs::write(&photo_file, "photo").unwrap();
 
-        let sqlite_path = temp_dir.path().join("test.fkproj");
+        let db_dir = tempdir().unwrap();
+        let sqlite_path = db_dir.path().join("test.fkproj");
         let app_state = Arc::new(AppState::default());
         app_state
             .connect_sqlite(sqlite_path.to_str().unwrap())
@@ -253,7 +259,8 @@ mod tests {
         let test_file = temp_dir.path().join("test.txt");
         fs::write(&test_file, "initial").unwrap(); // size 7
 
-        let sqlite_path = temp_dir.path().join("test.fkproj");
+        let db_dir = tempdir().unwrap();
+        let sqlite_path = db_dir.path().join("test.fkproj");
         let app_state = Arc::new(AppState::default());
         app_state
             .connect_sqlite(sqlite_path.to_str().unwrap())
@@ -303,7 +310,8 @@ mod tests {
         let test_file = temp_dir.path().join("test.txt");
         fs::write(&test_file, "content").unwrap();
 
-        let sqlite_path = temp_dir.path().join("test.fkproj");
+        let db_dir = tempdir().unwrap();
+        let sqlite_path = db_dir.path().join("test.fkproj");
         let app_state = Arc::new(AppState::default());
         app_state
             .connect_sqlite(sqlite_path.to_str().unwrap())
