@@ -82,7 +82,11 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
 
     const BATCH_SIZE: usize = 1000;
 
-    for entry in WalkDir::new(location_path).into_iter().flatten() {
+    for entry in WalkDir::new(location_path)
+        .skip_hidden(false)
+        .into_iter()
+        .flatten()
+    {
         if entry.file_type.is_file() {
             let path = entry.path();
             let file_path = match path.to_str() {
