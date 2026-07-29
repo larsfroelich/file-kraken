@@ -97,14 +97,7 @@ fn hash_potential_duplicates(
     duplicate_file_sizes: Vec<u64>,
 ) -> Option<FilesBySizeByHash> {
     let files_by_size_by_hash = Arc::new(RwLock::new(HashMap::default()));
-    let mut files_to_hash = Vec::new();
-    for size in duplicate_file_sizes {
-        if let Some(files) = get_files_by_size(&app_state, size) {
-            for file in files {
-                files_to_hash.push((size, file));
-            }
-        }
-    }
+    let mut files_to_hash = get_files_by_sizes(&app_state, duplicate_file_sizes)?;
 
     let nr_total = files_to_hash.len();
     let total_bytes: u64 = files_to_hash.iter().map(|(size, _)| *size).sum();
@@ -274,34 +267,48 @@ fn detect_hashed_duplicates(
     Some(())
 }
 
-fn get_files_by_size(app_state: &Arc<AppState>, size: u64) -> Option<Vec<FileKrakenFile>> {
+fn get_files_by_sizes(
+    app_state: &Arc<AppState>,
+    sizes: Vec<u64>,
+) -> Option<Vec<(u64, FileKrakenFile)>> {
     app_state.with_sqlite_conn(|conn| {
-        let mut stmt = conn.prepare(
-            "SELECT \
-        path, file_type, file_len, time_created, time_modified, hash_256 \
-        FROM files \
-        WHERE file_len = ?1",
-        )?;
-        let mut select_files = stmt.query([size])?;
-        let mut files = vec![];
-        while let Some(row) = select_files.next()? {
-            let file_path: String = row.get(0)?;
-            let file_type = match row.get::<usize, String>(1)?.as_str() {
-                "normal" => FileKrakenFileType::Normal,
-                "archive" => FileKrakenFileType::Archive,
-                x => {
-                    panic!("unknown file type {}", x)
-                }
-            };
-            let hash: Option<String> = row.get(5)?;
-            files.push(FileKrakenFile {
-                path: file_path,
-                file_type,
-                file_len: row.get(2)?,
-                time_created: row.get(3)?,
-                time_modified: row.get(4)?,
-                hash,
-            });
+        let mut files = Vec::new();
+        for chunk in sizes.chunks(999) {
+            let placeholders = vec!["?"; chunk.len()].join(", ");
+            let query = format!(
+                "SELECT \
+                path, file_type, file_len, time_created, time_modified, hash_256 \
+                FROM files \
+                WHERE file_len IN ({})",
+                placeholders
+            );
+            let mut stmt = conn.prepare(&query)?;
+            let params = rusqlite::params_from_iter(chunk.iter());
+            let mut select_files = stmt.query(params)?;
+
+            while let Some(row) = select_files.next()? {
+                let file_path: String = row.get(0)?;
+                let file_type = match row.get::<usize, String>(1)?.as_str() {
+                    "normal" => FileKrakenFileType::Normal,
+                    "archive" => FileKrakenFileType::Archive,
+                    x => {
+                        panic!("unknown file type {}", x)
+                    }
+                };
+                let hash: Option<String> = row.get(5)?;
+                let file_len: u64 = row.get(2)?;
+                files.push((
+                    file_len,
+                    FileKrakenFile {
+                        path: file_path,
+                        file_type,
+                        file_len,
+                        time_created: row.get(3)?,
+                        time_modified: row.get(4)?,
+                        hash,
+                    },
+                ));
+            }
         }
         Ok(files)
     })
