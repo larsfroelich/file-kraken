@@ -140,9 +140,13 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
             // mark file as found in the global set
             all_existing_files.remove(&file_path);
 
-            let batch = discovered_files_by_location
-                .entry(target_location.clone())
-                .or_default();
+            let batch = if let Some(b) = discovered_files_by_location.get_mut(target_location) {
+                b
+            } else {
+                discovered_files_by_location
+                    .entry(target_location.clone())
+                    .or_default()
+            };
             batch.push(file);
 
             // periodically flush batches to database and memory
