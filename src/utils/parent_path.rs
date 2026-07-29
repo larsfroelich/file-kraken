@@ -5,14 +5,7 @@ use std::path::Path;
 pub fn is_ancestor_of(ancestor: &str, descendant: &str) -> bool {
     let descendant_path = Path::new(descendant);
     let ancestor_path = Path::new(ancestor);
-    let mut descendant_path = descendant_path.parent();
-    while let Some(path) = descendant_path {
-        if path == ancestor_path {
-            return true;
-        }
-        descendant_path = path.parent();
-    }
-    false
+    descendant_path.starts_with(ancestor_path) && descendant_path != ancestor_path
 }
 
 /// Finds the longest (most specific) location path that contains the given child path.
