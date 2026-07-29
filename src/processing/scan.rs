@@ -67,13 +67,14 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
     if !relevant_locations.is_empty() {
         let paths: Vec<&str> = relevant_locations.iter().map(|l| l.path.as_str()).collect();
         for chunk in paths.chunks(900) {
-            let placeholders = vec!["?"; chunk.len()].join(",");
-            let query = format!("SELECT path FROM files WHERE location_path IN ({})", placeholders);
-
             let files = app_state.with_sqlite_conn(|conn| {
-                let mut stmt = conn.prepare(&query)?;
-                let params = rusqlite::params_from_iter(chunk.iter().copied());
-                let rows = stmt.query_map(params, |row| row.get::<_, String>(0))?;
+                let mut stmt = conn.prepare(&format!(
+                    "SELECT path FROM files WHERE location_path IN ({})",
+                    vec!["?"; chunk.len()].join(",")
+                ))?;
+                let rows = stmt.query_map(rusqlite::params_from_iter(chunk.iter().copied()), |row| {
+                    row.get::<_, String>(0)
+                })?;
                 Ok(rows.flatten().collect::<Vec<_>>())
             });
 
