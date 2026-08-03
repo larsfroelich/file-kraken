@@ -64,14 +64,23 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
 
     // pre-load all existing files across all relevant locations to track deletions globally
     let mut all_existing_files: HashSet<String> = HashSet::new();
-    for loc in &relevant_locations {
-        let files = app_state.with_sqlite_conn(|conn| {
-            let mut stmt = conn.prepare("SELECT path FROM files WHERE location_path = ?")?;
-            let rows = stmt.query_map([&loc.path], |row| row.get::<_, String>(0))?;
-            Ok(rows.flatten().collect::<Vec<_>>())
-        });
-        if let Some(files) = files {
-            all_existing_files.extend(files);
+    if !relevant_locations.is_empty() {
+        let paths: Vec<&str> = relevant_locations.iter().map(|l| l.path.as_str()).collect();
+        for chunk in paths.chunks(900) {
+            let files = app_state.with_sqlite_conn(|conn| {
+                let mut stmt = conn.prepare(&format!(
+                    "SELECT path FROM files WHERE location_path IN ({})",
+                    vec!["?"; chunk.len()].join(",")
+                ))?;
+                let rows = stmt.query_map(rusqlite::params_from_iter(chunk.iter().copied()), |row| {
+                    row.get::<_, String>(0)
+                })?;
+                Ok(rows.flatten().collect::<Vec<_>>())
+            });
+
+            if let Some(files) = files {
+                all_existing_files.extend(files);
+            }
         }
     }
 
