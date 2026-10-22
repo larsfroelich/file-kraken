@@ -161,6 +161,15 @@ impl AppState {
                     .unwrap() = val;
             }
         }
+        if let Some(scan_zips) = self.get_setting("scan_inside_zip_files") {
+            if let Ok(val) = scan_zips.parse() {
+                *self
+                    .find_duplicates_processing
+                    .scan_inside_zip_files
+                    .write()
+                    .unwrap() = val;
+            }
+        }
 
         Ok(())
     }
@@ -302,14 +311,49 @@ impl AppState {
 
     pub fn remove_file(&self, persist_to_db: bool, persist_to_disk: bool, file_path: &str) {
         if persist_to_disk {
-            match std::fs::remove_file(file_path) {
-                Ok(_) => {}
-                Err(_) => {
+            if let Some((zip_path, inner_name)) = file_path.split_once("::") {
+                // Remove file from zip archive
+                let temp_zip_path = format!("{}.tmp", zip_path);
+
+                let success = (|| -> Result<(), Box<dyn std::error::Error>> {
+                    let file = std::fs::File::open(zip_path)?;
+                    let mut archive = zip::ZipArchive::new(file)?;
+                    let mut temp_zip = zip::ZipWriter::new(std::fs::File::create(&temp_zip_path)?);
+
+                    for i in 0..archive.len() {
+                        let mut inner_file = archive.by_index(i)?;
+                        if let Ok(name) = inner_file.name() {
+                            if name != inner_name {
+                                let options = zip::write::SimpleFileOptions::default();
+                                temp_zip.start_file(name, options)?;
+                                std::io::copy(&mut inner_file, &mut temp_zip)?;
+                            }
+                        }
+                    }
+                    temp_zip.finish()?;
+                    Ok(())
+                })();
+
+                if success.is_ok() {
+                    let _ = std::fs::rename(&temp_zip_path, zip_path);
+                } else {
+                    let _ = std::fs::remove_file(&temp_zip_path);
                     rfd::MessageDialog::new()
                         .set_title("Error")
-                        .set_description("Failed to delete file")
+                        .set_description("Failed to delete file from zip archive")
                         .show();
                     return;
+                }
+            } else {
+                match std::fs::remove_file(file_path) {
+                    Ok(_) => {}
+                    Err(_) => {
+                        rfd::MessageDialog::new()
+                            .set_title("Error")
+                            .set_description("Failed to delete file")
+                            .show();
+                        return;
+                    }
                 }
             }
         }

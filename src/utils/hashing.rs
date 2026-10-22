@@ -13,19 +13,44 @@ pub fn hash_file(file_path: &str) -> io::Result<String> {
     use std::io::Read;
 
     let mut hasher = Sha256::new();
-    let mut file = fs::File::open(file_path)?;
 
-    BUFFER.with(|buf| {
-        let mut buffer = buf.borrow_mut();
-        loop {
-            let count = file.read(&mut buffer)?;
-            if count == 0 {
-                break;
+    if let Some((zip_path, inner_name)) = file_path.split_once("::") {
+        let zip_file = fs::File::open(zip_path)?;
+        let mut archive = match zip::ZipArchive::new(zip_file) {
+            Ok(archive) => archive,
+            Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e)),
+        };
+        let mut inner_file = match archive.by_name(inner_name) {
+            Ok(file) => file,
+            Err(e) => return Err(io::Error::new(io::ErrorKind::NotFound, e)),
+        };
+
+        BUFFER.with(|buf| {
+            let mut buffer = buf.borrow_mut();
+            loop {
+                let count = inner_file.read(&mut buffer)?;
+                if count == 0 {
+                    break;
+                }
+                hasher.update(&buffer[..count]);
             }
-            hasher.update(&buffer[..count]);
-        }
-        Ok::<(), io::Error>(())
-    })?;
+            Ok::<(), io::Error>(())
+        })?;
+    } else {
+        let mut file = fs::File::open(file_path)?;
+
+        BUFFER.with(|buf| {
+            let mut buffer = buf.borrow_mut();
+            loop {
+                let count = file.read(&mut buffer)?;
+                if count == 0 {
+                    break;
+                }
+                hasher.update(&buffer[..count]);
+            }
+            Ok::<(), io::Error>(())
+        })?;
+    }
 
     Ok(format!("{:X}", hasher.finalize()))
 }

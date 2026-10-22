@@ -16,6 +16,7 @@ pub struct FindDuplicatesState {
     pub min_file_size_input: RwLock<String>,
     pub min_file_size_unit: RwLock<SizeUnit>,
     pub include_same_location_duplicates: RwLock<bool>,
+    pub scan_inside_zip_files: RwLock<bool>,
 }
 
 impl Default for FindDuplicatesState {
@@ -26,6 +27,7 @@ impl Default for FindDuplicatesState {
             min_file_size_input: RwLock::new("0".to_string()),
             min_file_size_unit: RwLock::new(SizeUnit::MB),
             include_same_location_duplicates: RwLock::new(false),
+            scan_inside_zip_files: RwLock::new(true),
         }
     }
 }
@@ -59,6 +61,9 @@ pub fn run_find_file_duplicates(app_state: Arc<AppState>) -> Option<()> {
 
     let files_by_size_by_hash = hash_potential_duplicates(app_state.clone(), duplicate_file_sizes)?;
     detect_hashed_duplicates(&app_state, files_by_size_by_hash)?;
+
+    // Post-processing: If an entire zip file is a duplicate, filter out its internal files
+    filter_inner_zip_duplicates(&app_state);
 
     *get_duplicates_processing_state(&app_state).deref_mut() = FindDuplicatesStateType::Processed;
 
@@ -397,5 +402,64 @@ pub fn delete_duplicate(app_state: &Arc<AppState>, duplicate: &FileKrakenDuplica
 
     if let Some(file) = duplicate.deletable_file.as_ref() {
         app_state.remove_file(true, true, &file.path);
+    }
+}
+
+fn filter_inner_zip_duplicates(app_state: &Arc<AppState>) {
+    let mut duplicate_zip_paths = std::collections::HashSet::new();
+
+    // Find all zip files that are considered duplicates
+    {
+        let duplicates = app_state
+            .find_duplicates_processing
+            .duplicates
+            .read()
+            .unwrap();
+        for dup in duplicates.iter() {
+            if let Some(deletable) = &dup.deletable_file {
+                if deletable.file_type == FileKrakenFileType::Archive
+                    && deletable.path.to_lowercase().ends_with(".zip")
+                {
+                    duplicate_zip_paths.insert(deletable.path.clone());
+                }
+            }
+            for other in &dup.other_files {
+                if other.file_type == FileKrakenFileType::Archive
+                    && other.path.to_lowercase().ends_with(".zip")
+                {
+                    duplicate_zip_paths.insert(other.path.clone());
+                }
+            }
+        }
+    }
+
+    // Remove any duplicate entries that represent files inside those zip files
+    if !duplicate_zip_paths.is_empty() {
+        let mut duplicates = app_state
+            .find_duplicates_processing
+            .duplicates
+            .write()
+            .unwrap();
+        duplicates.retain(|dup| {
+            let mut is_inner = false;
+            if let Some(deletable) = &dup.deletable_file {
+                if let Some((zip_path, _)) = deletable.path.split_once("::") {
+                    if duplicate_zip_paths.contains(zip_path) {
+                        is_inner = true;
+                    }
+                }
+            }
+            if !is_inner {
+                for other in &dup.other_files {
+                    if let Some((zip_path, _)) = other.path.split_once("::") {
+                        if duplicate_zip_paths.contains(zip_path) {
+                            is_inner = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            !is_inner
+        });
     }
 }

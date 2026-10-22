@@ -140,6 +140,29 @@ impl FileKrakenApp {
                                 &include_same.to_string(),
                             );
                         }
+
+                        ui.add_space(20.0);
+                        let mut scan_zips = *self
+                            .app_state
+                            .find_duplicates_processing
+                            .scan_inside_zip_files
+                            .read()
+                            .unwrap();
+                        if ui
+                            .checkbox(&mut scan_zips, "Scan inside zip files")
+                            .clicked()
+                        {
+                            *self
+                                .app_state
+                                .find_duplicates_processing
+                                .scan_inside_zip_files
+                                .write()
+                                .unwrap() = scan_zips;
+                            self.app_state.set_setting(
+                                "scan_inside_zip_files",
+                                &scan_zips.to_string(),
+                            );
+                        }
                     });
                 });
                 ui.separator();
@@ -177,15 +200,55 @@ impl FileKrakenApp {
                                     .show()
                                     .eq(&MessageDialogResult::Yes)
                                 {
-                                    let _duplicates = self
+                                    let mut _duplicates = self
                                         .app_state
                                         .find_duplicates_processing
                                         .duplicates
                                         .read()
                                         .unwrap()
                                         .clone();
+
+                                    // Check for large zip files
+                                    let mut has_large_zip = false;
+                                    for dup in &_duplicates {
+                                        if let Some(deletable) = &dup.deletable_file {
+                                            if let Some((zip_path, _)) = deletable.path.split_once("::") {
+                                                if let Ok(metadata) = std::fs::metadata(zip_path) {
+                                                    if metadata.len() > 500 * 1024 * 1024 {
+                                                        has_large_zip = true;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    if has_large_zip {
+                                        let skip = rfd::MessageDialog::new()
+                                            .set_title("Large Zip Files Detected")
+                                            .set_description("Some duplicates are inside zip files larger than 500MB. Modifying them can be slow and use lots of disk space. Skip deleting files in large zips?")
+                                            .set_buttons(rfd::MessageButtons::YesNo)
+                                            .show()
+                                            .eq(&MessageDialogResult::Yes);
+
+                                        if skip {
+                                            _duplicates.retain(|dup| {
+                                                if let Some(deletable) = &dup.deletable_file {
+                                                    if let Some((zip_path, _)) = deletable.path.split_once("::") {
+                                                        if let Ok(metadata) = std::fs::metadata(zip_path) {
+                                                            if metadata.len() > 500 * 1024 * 1024 {
+                                                                return false;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                true
+                                            });
+                                        }
+                                    }
+
                                     let _app_state = self.app_state.clone();
-                                    let total_nr_eligible = nr_eligible;
+                                    let total_nr_eligible = _duplicates.iter().filter(|x| x.deletable_file.is_some()).count();
                                     thread::spawn(move || {
                                         let mut nr_deleted = 0;
                                         set_processing_message(&_app_state, format!(
