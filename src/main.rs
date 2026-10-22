@@ -30,11 +30,21 @@ pub struct FileKrakenApp {
     app_state: Arc<state::AppState>,
 
     dark_theme: bool,
+
+    temp_project_path: Option<String>,
 }
 
 fn try_connect_sqlite(_self: &mut FileKrakenApp, path: &str) {
     if let Err(err) = _self.app_state.connect_sqlite(path) {
         error_dialog(&format!("Failed to create project file. Error: {}", err));
+    }
+}
+
+impl Drop for FileKrakenApp {
+    fn drop(&mut self) {
+        if let Some(path) = &self.temp_project_path {
+            let _ = std::fs::remove_file(path);
+        }
     }
 }
 
@@ -74,6 +84,25 @@ impl eframe::App for FileKrakenApp {
                                     } else {
                                         error_dialog("Invalid project path");
                                     }
+                                }
+                            }
+                            ui.add_space(8.0);
+                            ui.label("or");
+                            ui.add_space(8.0);
+                            if ui.button("⏱️ Use temporary project").clicked() {
+                                let mut dir = std::env::temp_dir();
+                                dir.push("file-kraken");
+                                let _ = std::fs::create_dir_all(&dir);
+                                let ts = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_secs();
+                                let temp_file = dir.join(format!("file-kraken-temp-{}.fkrproj", ts));
+                                if let Some(path) = temp_file.to_str() {
+                                    self.temp_project_path = Some(path.to_string());
+                                    try_connect_sqlite(self, path);
+                                } else {
+                                    error_dialog("Failed to create temporary project path");
                                 }
                             }
                             ui.add_space(8.0);
