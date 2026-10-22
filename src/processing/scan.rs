@@ -147,7 +147,43 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
                     .entry(target_location.clone())
                     .or_default()
             };
-            batch.push(file);
+            batch.push(file.clone());
+
+            if file.file_type == FileKrakenFileType::Archive
+                && file_path.to_lowercase().ends_with(".zip")
+            {
+                // Also scan inside the zip archive
+                // Zip files store the central directory at the end of the file.
+                // Opening it normally will seek to the end, reading the directory, which avoids downloading the whole file on a network share.
+                if let Ok(fs_file) = std::fs::File::open(&file_path) {
+                    if let Ok(mut archive) = zip::ZipArchive::new(fs_file) {
+                        for i in 0..archive.len() {
+                            if let Ok(inner_file) = archive.by_index(i) {
+                                if !inner_file.is_dir() {
+                                    if let Ok(inner_name) = inner_file.name() {
+                                        if let Some(name) = inner_name.split('/').next_back() {
+                                            if !name.is_empty() {
+                                                let inner_path =
+                                                    format!("{}::{}", file_path, inner_name);
+                                                let inner_kraken_file = FileKrakenFile {
+                                                    path: inner_path.clone(),
+                                                    file_type: FileKrakenFileType::Normal,
+                                                    file_len: inner_file.size(),
+                                                    time_created: file.time_created, // inherit from zip FileKrakenFile
+                                                    time_modified: file.time_modified,
+                                                    hash: None,
+                                                };
+                                                all_existing_files.remove(&inner_path);
+                                                batch.push(inner_kraken_file);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             // periodically flush batches to database and memory
             if batch.len() >= BATCH_SIZE {
