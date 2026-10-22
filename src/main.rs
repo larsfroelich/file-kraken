@@ -31,7 +31,6 @@ pub struct FileKrakenApp {
 
     dark_theme: bool,
 
-    is_temp_project: bool,
     temp_project_path: Option<String>,
 }
 
@@ -43,10 +42,8 @@ fn try_connect_sqlite(_self: &mut FileKrakenApp, path: &str) {
 
 impl Drop for FileKrakenApp {
     fn drop(&mut self) {
-        if self.is_temp_project {
-            if let Some(path) = &self.temp_project_path {
-                let _ = std::fs::remove_file(path);
-            }
+        if let Some(path) = &self.temp_project_path {
+            let _ = std::fs::remove_file(path);
         }
     }
 }
@@ -102,7 +99,6 @@ impl eframe::App for FileKrakenApp {
                                     .as_secs();
                                 let temp_file = dir.join(format!("file-kraken-temp-{}.fkrproj", ts));
                                 if let Some(path) = temp_file.to_str() {
-                                    self.is_temp_project = true;
                                     self.temp_project_path = Some(path.to_string());
                                     try_connect_sqlite(self, path);
                                 } else {
