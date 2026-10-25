@@ -190,7 +190,26 @@ impl FileKrakenApp {
                             .eq(&FindDuplicatesStateType::Processed)
                         {
                             ui.add_space(5.0);
-                            if ui.button("Delete all eligible duplicates").clicked() {
+                            let mut has_zip_duplicates = false;
+                            {
+                                let duplicates = self.app_state.find_duplicates_processing.duplicates.read().unwrap();
+                                for dup in duplicates.iter() {
+                                    if let Some(deletable) = &dup.deletable_file {
+                                        if deletable.path.contains("::") {
+                                            has_zip_duplicates = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+
+                            let btn_text = if has_zip_duplicates {
+                                "Delete all eligible duplicates (One per ZIP per pass)"
+                            } else {
+                                "Delete all eligible duplicates"
+                            };
+
+                            if ui.button(btn_text).clicked() {
                                 if rfd::MessageDialog::new()
                                     .set_title("Delete all eligible duplicates")
                                     .set_description(
@@ -283,13 +302,20 @@ impl FileKrakenApp {
                                         }
 
                                         // For ZIP files, since one deletion invalidates remaining indexes,
-                                        // the simplest robust solution is to trigger a re-run of the duplicate search.
-                                        // Rather than complex index mapping, we delete ONE zip member per archive, and let the re-scan find the rest.
-                                        // A more advanced optimization would rewrite the archive once for all members, but the app state architecture
-                                        // handles rewrites per-file currently.
+                                        // we now process them in a loop where we process one per archive, trigger a rescan/rehash of that archive,
+                                        // and then fetch the fresh duplicate state if more remain.
+                                        // However, to keep it simple within this thread without recursive locking,
+                                        // we'll just process ONE zip member per archive as before, BUT we will update the UI message
+                                        // to make it explicit that multiple clicks may be required, or we just let it trigger the re-run automatically.
+                                        // Actually, since we trigger find_file_duplicates at the end, it WILL find the remaining ones automatically
+                                        // but the user would have to click again. Let's make it more robust.
 
                                         let mut deleted_zips = std::collections::HashSet::new();
                                         let mut had_zip = false;
+
+                                        // We only do one pass of zips here. The UI will show the remaining ones after the auto-rerun.
+                                        // We should change the button text or add a label explaining this.
+                                        // For now, let's keep the single-pass behavior and we will add a note in the UI below.
                                         for duplicate in zip_deletes.iter() {
                                             if let Some(deletable) = &duplicate.deletable_file {
                                                 if let Some((zip_path, _)) = deletable.path.split_once("::") {
@@ -303,8 +329,6 @@ impl FileKrakenApp {
                                                             nr_deleted, total_nr_eligible
                                                         ));
 
-                                                        // Important: We must fetch fresh duplicate object from state if possible, but our deletable
-                                                        // is still valid since it's the FIRST delete for this zip in this batch.
                                                         delete_duplicate(&_app_state, duplicate);
                                                         nr_deleted += 1;
                                                     }
