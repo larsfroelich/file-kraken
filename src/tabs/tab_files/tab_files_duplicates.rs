@@ -313,6 +313,12 @@ impl FileKrakenApp {
                                         }
 
                                         if had_zip {
+                                            // Rescan the locations that had zips modified to ensure fresh member state
+                                            for zip_path in deleted_zips.iter() {
+                                                if let Some(parent) = crate::utils::parent_path::get_longest_parent_path(zip_path, _app_state.get_locations_list_readonly().iter()) {
+                                                    crate::processing::scan::scan_location_files(_app_state.clone(), &parent);
+                                                }
+                                            }
                                             crate::processing::find_duplicates::find_file_duplicates(_app_state.clone());
                                         } else {
                                             *get_duplicates_processing_state(&_app_state)
@@ -444,11 +450,21 @@ fn table_row(app_state: &Arc<AppState>, row: &mut TableRow, duplicate: &FileKrak
                 }
                 if proceed {
                     let has_zip = deletable_file.path.contains("::");
+                    let zip_path = if has_zip {
+                        deletable_file.path.split_once("::").map(|(z, _)| z.to_string())
+                    } else { None };
+
                     delete_duplicate(app_state, duplicate);
-                    if has_zip {
+
+                    if let Some(zp) = zip_path {
                         // Restart duplicate search automatically to refresh stale indexes in the UI
+                        // Also rescan the zip to ensure members are correctly updated
                         let _app_state = app_state.clone();
                         std::thread::spawn(move || {
+                            if let Some(parent) = crate::utils::parent_path::get_longest_parent_path(&zp, _app_state.get_locations_list_readonly().iter()) {
+                                // Full location rescan ensures zip members are freshly enumerated
+                                crate::processing::scan::scan_location_files(_app_state.clone(), &parent);
+                            }
                             crate::processing::find_duplicates::find_file_duplicates(_app_state);
                         });
                     }
