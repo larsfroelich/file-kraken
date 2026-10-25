@@ -256,8 +256,12 @@ impl FileKrakenApp {
                                             (nr_deleted as f64 / total_nr_eligible as f64) * 100.0,
                                             nr_deleted, total_nr_eligible
                                         ));
+                                        let mut had_zip = false;
                                         for duplicate in _duplicates.iter() {
-                                            if duplicate.deletable_file.is_some() {
+                                            if let Some(deletable) = &duplicate.deletable_file {
+                                                if deletable.path.contains("::") {
+                                                    had_zip = true;
+                                                }
                                                 set_processing_message(&_app_state, format!(
                                                     "Deleting eligible duplicates ... {:.2}% ({}/{})",
                                                     (nr_deleted as f64 / total_nr_eligible as f64) * 100.0,
@@ -267,9 +271,14 @@ impl FileKrakenApp {
                                                 nr_deleted += 1;
                                             }
                                         }
-                                        *get_duplicates_processing_state(&_app_state)
-                                            .deref_mut()
-                                            = FindDuplicatesStateType::Processed;
+
+                                        if had_zip {
+                                            crate::processing::find_duplicates::find_file_duplicates(_app_state.clone());
+                                        } else {
+                                            *get_duplicates_processing_state(&_app_state)
+                                                .deref_mut()
+                                                = FindDuplicatesStateType::Processed;
+                                        }
                                     });
                                 }
                             }
@@ -394,7 +403,15 @@ fn table_row(app_state: &Arc<AppState>, row: &mut TableRow, duplicate: &FileKrak
                     }
                 }
                 if proceed {
+                    let has_zip = deletable_file.path.contains("::");
                     delete_duplicate(app_state, duplicate);
+                    if has_zip {
+                        // Restart duplicate search automatically to refresh stale indexes in the UI
+                        let _app_state = app_state.clone();
+                        std::thread::spawn(move || {
+                            crate::processing::find_duplicates::find_file_duplicates(_app_state);
+                        });
+                    }
                 }
             }
         }
