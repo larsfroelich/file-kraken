@@ -453,6 +453,8 @@ impl AppState {
                             }
                         }
                     }
+
+                    // Actually perform the removal of these paths
                     self.remove_files(persist_to_db, &inner_paths_to_remove);
 
                     // Re-read and re-add internal files using the new indexes so they are stable
@@ -567,18 +569,24 @@ impl AppState {
             delete_file.execute([file_path]).unwrap();
         }
 
-        let file_parent_location_path =
-            get_longest_parent_path(file_path, self.get_locations_list_readonly().iter())
-                .unwrap_or_else(|| panic!("no parent location found for file {}", file_path));
+        // Skip final generic memory removal for zip archives, because the zip branch above
+        // already re-added the surviving members. If a surviving member has the exact same name,
+        // it would get erroneously deleted by this generic trailing cleanup.
+        let is_zip_member = file_path.contains("::");
+        if !is_zip_member {
+            let file_parent_location_path =
+                get_longest_parent_path(file_path, self.get_locations_list_readonly().iter())
+                    .unwrap_or_else(|| panic!("no parent location found for file {}", file_path));
 
-        self.files_by_location_by_path
-            .read()
-            .unwrap()
-            .get(&file_parent_location_path)
-            .unwrap()
-            .write()
-            .unwrap()
-            .remove(file_path);
+            self.files_by_location_by_path
+                .read()
+                .unwrap()
+                .get(&file_parent_location_path)
+                .unwrap()
+                .write()
+                .unwrap()
+                .remove(file_path);
+        }
     }
 
     #[allow(clippy::too_many_arguments)]

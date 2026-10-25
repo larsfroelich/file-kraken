@@ -256,19 +256,59 @@ impl FileKrakenApp {
                                             (nr_deleted as f64 / total_nr_eligible as f64) * 100.0,
                                             nr_deleted, total_nr_eligible
                                         ));
-                                        let mut had_zip = false;
+
+                                        // Group by ZIP archive to minimize rewrites and index invalidations
+                                        // A simple grouping strategy: process non-zip files normally, process zip files later
+                                        let mut normal_deletes = Vec::new();
+                                        let mut zip_deletes = Vec::new();
+
                                         for duplicate in _duplicates.iter() {
                                             if let Some(deletable) = &duplicate.deletable_file {
                                                 if deletable.path.contains("::") {
-                                                    had_zip = true;
+                                                    zip_deletes.push(duplicate.clone());
+                                                } else {
+                                                    normal_deletes.push(duplicate.clone());
                                                 }
-                                                set_processing_message(&_app_state, format!(
-                                                    "Deleting eligible duplicates ... {:.2}% ({}/{})",
-                                                    (nr_deleted as f64 / total_nr_eligible as f64) * 100.0,
-                                                    nr_deleted, total_nr_eligible
-                                                ));
-                                                delete_duplicate(&_app_state, duplicate);
-                                                nr_deleted += 1;
+                                            }
+                                        }
+
+                                        for duplicate in normal_deletes.iter() {
+                                            set_processing_message(&_app_state, format!(
+                                                "Deleting eligible duplicates ... {:.2}% ({}/{})",
+                                                (nr_deleted as f64 / total_nr_eligible as f64) * 100.0,
+                                                nr_deleted, total_nr_eligible
+                                            ));
+                                            delete_duplicate(&_app_state, duplicate);
+                                            nr_deleted += 1;
+                                        }
+
+                                        // For ZIP files, since one deletion invalidates remaining indexes,
+                                        // the simplest robust solution is to trigger a re-run of the duplicate search.
+                                        // Rather than complex index mapping, we delete ONE zip member per archive, and let the re-scan find the rest.
+                                        // A more advanced optimization would rewrite the archive once for all members, but the app state architecture
+                                        // handles rewrites per-file currently.
+
+                                        let mut deleted_zips = std::collections::HashSet::new();
+                                        let mut had_zip = false;
+                                        for duplicate in zip_deletes.iter() {
+                                            if let Some(deletable) = &duplicate.deletable_file {
+                                                if let Some((zip_path, _)) = deletable.path.split_once("::") {
+                                                    if !deleted_zips.contains(zip_path) {
+                                                        had_zip = true;
+                                                        deleted_zips.insert(zip_path.to_string());
+
+                                                        set_processing_message(&_app_state, format!(
+                                                            "Deleting eligible duplicates ... {:.2}% ({}/{})",
+                                                            (nr_deleted as f64 / total_nr_eligible as f64) * 100.0,
+                                                            nr_deleted, total_nr_eligible
+                                                        ));
+
+                                                        // Important: We must fetch fresh duplicate object from state if possible, but our deletable
+                                                        // is still valid since it's the FIRST delete for this zip in this batch.
+                                                        delete_duplicate(&_app_state, duplicate);
+                                                        nr_deleted += 1;
+                                                    }
+                                                }
                                             }
                                         }
 
