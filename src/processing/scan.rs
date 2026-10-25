@@ -149,7 +149,14 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
             };
             batch.push(file.clone());
 
-            if file.file_type == FileKrakenFileType::Archive
+            let scan_inside_zips = app_state
+                .get_setting("scan_inside_zip_files")
+                .unwrap_or_else(|| "true".to_string())
+                .parse()
+                .unwrap_or(true);
+
+            if scan_inside_zips
+                && file.file_type == FileKrakenFileType::Archive
                 && file_path.to_lowercase().ends_with(".zip")
             {
                 // Also scan inside the zip archive
@@ -163,11 +170,21 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
                                     if let Ok(inner_name) = inner_file.name() {
                                         if let Some(name) = inner_name.split('/').next_back() {
                                             if !name.is_empty() {
+                                                // Key inner files using archive path + inner file index rather than just name
+                                                // This avoids collisions if a zip has multiple files with same names in different folders
+                                                // but we also include the name for display purposes
                                                 let inner_path =
-                                                    format!("{}::{}", file_path, inner_name);
+                                                    format!("{}::{}::{}", file_path, i, inner_name);
+                                                let is_nested_zip =
+                                                    name.to_lowercase().ends_with(".zip");
+                                                let inner_file_type = if is_nested_zip {
+                                                    FileKrakenFileType::Archive
+                                                } else {
+                                                    FileKrakenFileType::Normal
+                                                };
                                                 let inner_kraken_file = FileKrakenFile {
                                                     path: inner_path.clone(),
-                                                    file_type: FileKrakenFileType::Normal,
+                                                    file_type: inner_file_type,
                                                     file_len: inner_file.size(),
                                                     time_created: file.time_created, // inherit from zip FileKrakenFile
                                                     time_modified: file.time_modified,

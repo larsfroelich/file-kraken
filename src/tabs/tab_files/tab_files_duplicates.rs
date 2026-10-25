@@ -369,8 +369,7 @@ fn table_row(app_state: &Arc<AppState>, row: &mut TableRow, duplicate: &FileKrak
     };
 
     row.col(|ui| {
-        if let Some(deletable_file) = &duplicate.deletable_file {
-            if ui.button("🗑️").clicked()
+        if let Some(deletable_file) = &duplicate.deletable_file {            if ui.button("🗑️").clicked()
                 && rfd::MessageDialog::new()
                     .set_title("Delete file?")
                     .set_description(format!(
@@ -381,7 +380,22 @@ fn table_row(app_state: &Arc<AppState>, row: &mut TableRow, duplicate: &FileKrak
                     .show()
                     .eq(&MessageDialogResult::Yes)
             {
-                delete_duplicate(app_state, duplicate);
+                let mut proceed = true;
+                if let Some((zip_path, _)) = deletable_file.path.split_once("::") {
+                    if let Ok(metadata) = std::fs::metadata(zip_path) {
+                        if metadata.len() > 500 * 1024 * 1024 {
+                            proceed = rfd::MessageDialog::new()
+                                .set_title("Large Zip File Detected")
+                                .set_description("This file is inside a zip file larger than 500MB. Modifying it can be slow and use lots of disk space. Proceed?")
+                                .set_buttons(rfd::MessageButtons::YesNo)
+                                .show()
+                                .eq(&MessageDialogResult::Yes);
+                        }
+                    }
+                }
+                if proceed {
+                    delete_duplicate(app_state, duplicate);
+                }
             }
         }
     });

@@ -311,9 +311,17 @@ impl AppState {
 
     pub fn remove_file(&self, persist_to_db: bool, persist_to_disk: bool, file_path: &str) {
         if persist_to_disk {
-            if let Some((zip_path, inner_name)) = file_path.split_once("::") {
-                // Remove file from zip archive
-                let temp_zip_path = format!("{}.tmp", zip_path);
+            if let Some((zip_path, inner_rest)) = file_path.split_once("::") {
+                // Format is zip_path::index::name
+                let (inner_idx_str, _) = inner_rest.split_once("::").unwrap_or(("0", inner_rest));
+                let inner_idx: usize = inner_idx_str.parse().unwrap_or(0);
+
+                // Generate a unique temp path to prevent race conditions or collisions
+                let unique_id = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos();
+                let temp_zip_path = format!("{}.tmp.{}", zip_path, unique_id);
 
                 let success = (|| -> Result<(), Box<dyn std::error::Error>> {
                     let file = std::fs::File::open(zip_path)?;
@@ -321,13 +329,14 @@ impl AppState {
                     let mut temp_zip = zip::ZipWriter::new(std::fs::File::create(&temp_zip_path)?);
 
                     for i in 0..archive.len() {
-                        let mut inner_file = archive.by_index(i)?;
-                        if let Ok(name) = inner_file.name() {
-                            if name != inner_name {
-                                let options = zip::write::SimpleFileOptions::default();
-                                temp_zip.start_file(name, options)?;
-                                std::io::copy(&mut inner_file, &mut temp_zip)?;
-                            }
+                        let inner_file = archive.by_index(i)?;
+                        // Use raw copy to preserve compression and metadata (like symlinks)
+                        if inner_file.name_raw().is_empty() {
+                            continue;
+                        }
+
+                        if i != inner_idx {
+                            temp_zip.raw_copy_file(inner_file)?;
                         }
                     }
                     temp_zip.finish()?;
@@ -335,7 +344,49 @@ impl AppState {
                 })();
 
                 if success.is_ok() {
-                    let _ = std::fs::rename(&temp_zip_path, zip_path);
+                    if std::fs::rename(&temp_zip_path, zip_path).is_err() {
+                        let _ = std::fs::remove_file(&temp_zip_path);
+                        rfd::MessageDialog::new()
+                            .set_title("Error")
+                            .set_description("Failed to replace zip archive")
+                            .show();
+                        return;
+                    }
+
+                    // Update in-memory state for the zip file BEFORE we attempt DB writes
+                    if let Ok(metadata) = std::fs::metadata(zip_path) {
+                        let new_len = metadata.len();
+                        let new_hash = crate::utils::hashing::hash_file(zip_path).ok();
+
+                        // Also update the in-memory state for the zip file
+                        let zip_parent_location_path =
+                            crate::utils::parent_path::get_longest_parent_path(
+                                zip_path,
+                                self.get_locations_list_readonly().iter(),
+                            );
+                        if let Some(parent_path) = zip_parent_location_path {
+                            if let Some(location_files) = self
+                                .files_by_location_by_path
+                                .read()
+                                .unwrap()
+                                .get(&parent_path)
+                            {
+                                if let Some(zip_file) =
+                                    location_files.write().unwrap().get_mut(zip_path)
+                                {
+                                    zip_file.file_len = new_len;
+                                    zip_file.hash = new_hash.clone();
+                                }
+                            }
+                        }
+
+                        let _ = self.with_sqlite_conn(|conn| {
+                            conn.execute(
+                                "UPDATE files SET file_len = ?1, hash_256 = ?2 WHERE path = ?3",
+                                rusqlite::params![new_len, new_hash, zip_path],
+                            )
+                        });
+                    }
                 } else {
                     let _ = std::fs::remove_file(&temp_zip_path);
                     rfd::MessageDialog::new()

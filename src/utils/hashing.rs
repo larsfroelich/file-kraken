@@ -14,13 +14,17 @@ pub fn hash_file(file_path: &str) -> io::Result<String> {
 
     let mut hasher = Sha256::new();
 
-    if let Some((zip_path, inner_name)) = file_path.split_once("::") {
+    if let Some((zip_path, inner_rest)) = file_path.split_once("::") {
+        // format is zip_path::index::name
+        let (inner_idx_str, _) = inner_rest.split_once("::").unwrap_or(("0", inner_rest));
+        let inner_idx: usize = inner_idx_str.parse().unwrap_or(0);
+
         let zip_file = fs::File::open(zip_path)?;
         let mut archive = match zip::ZipArchive::new(zip_file) {
             Ok(archive) => archive,
             Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e)),
         };
-        let mut inner_file = match archive.by_name(inner_name) {
+        let mut inner_file = match archive.by_index(inner_idx) {
             Ok(file) => file,
             Err(e) => return Err(io::Error::new(io::ErrorKind::NotFound, e)),
         };
