@@ -480,8 +480,8 @@ fn table_row(app_state: &Arc<AppState>, row: &mut TableRow, duplicate: &FileKrak
 
                     if has_zip {
                         // Lock the UI before making the first delete to prevent clicking stale indexes
-                        *crate::processing::find_duplicates::get_duplicates_processing_state(app_state)
-                            .deref_mut() = FindDuplicatesStateType::Processing("Reindexing zip archive...".to_string());
+                        *app_state.find_duplicates_processing.state.write().unwrap() =
+                            FindDuplicatesStateType::Processing("Reindexing zip archive...".to_string());
                     }
 
                     delete_duplicate(app_state, duplicate);
