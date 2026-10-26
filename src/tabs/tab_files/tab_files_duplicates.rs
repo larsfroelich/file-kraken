@@ -337,13 +337,17 @@ impl FileKrakenApp {
                                         }
 
                                         if had_zip {
+                                            // Lock the UI processing state while the rescan happens. This fixes bulk delete races.
+                                            *crate::processing::find_duplicates::get_duplicates_processing_state(&_app_state)
+                                                .deref_mut() = FindDuplicatesStateType::Processing("Reindexing zip archive...".to_string());
+
                                             // Rescan the locations that had zips modified to ensure fresh member state
                                             for zip_path in deleted_zips.iter() {
                                                 if let Some(parent) = crate::utils::parent_path::get_longest_parent_path(zip_path, _app_state.get_locations_list_readonly().iter()) {
                                                     crate::processing::scan::scan_location_files(_app_state.clone(), &parent);
                                                 }
                                             }
-                                            crate::processing::find_duplicates::find_file_duplicates(_app_state.clone());
+                                            crate::processing::find_duplicates::find_file_duplicates_force(_app_state.clone());
                                         } else {
                                             *get_duplicates_processing_state(&_app_state)
                                                 .deref_mut()
@@ -495,7 +499,7 @@ fn table_row(app_state: &Arc<AppState>, row: &mut TableRow, duplicate: &FileKrak
                                 // Full location rescan ensures zip members are freshly enumerated
                                 crate::processing::scan::scan_location_files(_app_state.clone(), &parent);
                             }
-                            crate::processing::find_duplicates::find_file_duplicates(_app_state);
+                            crate::processing::find_duplicates::find_file_duplicates_force(_app_state);
                         });
                     }
                 }

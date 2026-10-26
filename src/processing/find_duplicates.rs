@@ -51,6 +51,31 @@ pub fn find_file_duplicates(app_state: Arc<AppState>) {
     }
 }
 
+pub fn find_file_duplicates_force(app_state: Arc<AppState>) {
+    // Clear list but bypass the Processing check so it can run immediately after a zip delete triggers Processing
+    clear_duplicates_list(&app_state);
+
+    set_processing_message(&app_state, "Scanning for file size matches...".to_string());
+    if let Some(duplicate_file_sizes) = find_duplicate_file_sizes(&app_state) {
+        if let Some(files_by_size_by_hash) =
+            hash_potential_duplicates(app_state.clone(), duplicate_file_sizes)
+        {
+            let _ = detect_hashed_duplicates(&app_state, files_by_size_by_hash);
+            filter_inner_zip_duplicates(&app_state);
+        }
+    } else {
+        rfd::MessageDialog::new()
+            .set_title("Failed to find duplicates")
+            .set_description("Failed to find duplicates")
+            .show();
+        clear_duplicates_list(&app_state);
+        *get_duplicates_processing_state(&app_state).deref_mut() = FindDuplicatesStateType::None;
+        return;
+    }
+
+    *get_duplicates_processing_state(&app_state).deref_mut() = FindDuplicatesStateType::Processed;
+}
+
 pub fn run_find_file_duplicates(app_state: Arc<AppState>) -> Option<()> {
     if !prepare_duplicate_search(&app_state) {
         return Some(());
