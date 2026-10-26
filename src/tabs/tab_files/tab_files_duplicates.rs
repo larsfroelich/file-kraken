@@ -478,6 +478,12 @@ fn table_row(app_state: &Arc<AppState>, row: &mut TableRow, duplicate: &FileKrak
                         deletable_file.path.split_once("::").map(|(z, _)| z.to_string())
                     } else { None };
 
+                    if has_zip {
+                        // Lock the UI before making the first delete to prevent clicking stale indexes
+                        *crate::processing::find_duplicates::get_duplicates_processing_state(app_state)
+                            .deref_mut() = FindDuplicatesStateType::Processing("Reindexing zip archive...".to_string());
+                    }
+
                     delete_duplicate(app_state, duplicate);
 
                     if let Some(zp) = zip_path {
