@@ -201,6 +201,14 @@ fn hash_potential_duplicates(
         .map(|lock| lock.into_inner().unwrap())
 }
 
+fn filter_out_archive_members(files: &[FileKrakenFile]) -> Vec<FileKrakenFile> {
+    files
+        .iter()
+        .filter(|f| f.file_type != FileKrakenFileType::ArchiveMember)
+        .cloned()
+        .collect()
+}
+
 fn detect_hashed_duplicates(
     app_state: &Arc<AppState>,
     files_by_size_by_hash: FilesBySizeByHash,
@@ -211,6 +219,7 @@ fn detect_hashed_duplicates(
     );
     for (_, files_by_size) in files_by_size_by_hash.iter() {
         for (_, files) in lock_rw_read_or_exit(files_by_size, app_state)?.iter() {
+            let files = filter_out_archive_members(files);
             if files.len() > 1 {
                 let mut duplicates_list = lock_rw_write_or_exit(
                     &app_state.find_duplicates_processing.duplicates,
@@ -289,6 +298,7 @@ fn get_files_by_size(app_state: &Arc<AppState>, size: u64) -> Option<Vec<FileKra
             let file_type = match row.get::<usize, String>(1)?.as_str() {
                 "normal" => FileKrakenFileType::Normal,
                 "archive" => FileKrakenFileType::Archive,
+                "archive_member" => FileKrakenFileType::ArchiveMember,
                 x => {
                     panic!("unknown file type {}", x)
                 }
@@ -301,6 +311,9 @@ fn get_files_by_size(app_state: &Arc<AppState>, size: u64) -> Option<Vec<FileKra
                 time_created: row.get(3)?,
                 time_modified: row.get(4)?,
                 hash,
+                archive_path: None,
+                archive_size: None,
+                archive_mtime: None,
             });
         }
         Ok(files)

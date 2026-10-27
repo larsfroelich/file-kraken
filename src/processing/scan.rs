@@ -27,6 +27,8 @@ fn is_archive_path(path: &Path) -> bool {
 use crate::state::file::FileKrakenFile;
 use crate::utils::parent_path::is_ancestor_of;
 use std::collections::{HashMap, HashSet};
+use std::fs::File;
+use zip::ZipArchive;
 
 /// Scans a directory for files and updates the application state.
 ///
@@ -120,7 +122,7 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
 
             let file = FileKrakenFile {
                 path: file_path.clone(),
-                file_type,
+                file_type: file_type.clone(),
                 file_len: file_metadata.len(),
                 time_created: file_metadata
                     .created()
@@ -135,10 +137,54 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
                     .unwrap_or_default()
                     .as_secs(),
                 hash: None,
+                archive_path: None,
+                archive_size: None,
+                archive_mtime: None,
             };
 
             // mark file as found in the global set
             all_existing_files.remove(&file_path);
+
+            let mut files_to_add = vec![file.clone()];
+
+            if file_type == FileKrakenFileType::Archive
+                && file_path.to_lowercase().ends_with(".zip")
+            {
+                if let Ok(fs_file) = File::open(&path) {
+                    if let Ok(mut archive) = ZipArchive::new(fs_file) {
+                        for i in 0..archive.len() {
+                            if let Ok(member) = archive.by_index(i) {
+                                if member.is_file() {
+                                    // Properly decode UTF-8 to avoid breaking hashing of non-ascii filenames
+                                    let member_name =
+                                        String::from_utf8_lossy(member.name_raw()).into_owned();
+
+                                    let member_path =
+                                        format!("{}::{}::{}", file_path, i, member_name);
+                                    let member_len = member.size();
+
+                                    let time_modified = file.time_modified;
+
+                                    let member_file = FileKrakenFile {
+                                        path: member_path.clone(),
+                                        file_type: FileKrakenFileType::ArchiveMember,
+                                        file_len: member_len,
+                                        time_created: file.time_created,
+                                        time_modified,
+                                        hash: None,
+                                        archive_path: Some(file_path.clone()),
+                                        archive_size: Some(file.file_len),
+                                        archive_mtime: Some(file.time_modified),
+                                    };
+
+                                    all_existing_files.remove(&member_path);
+                                    files_to_add.push(member_file);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             let batch = if let Some(b) = discovered_files_by_location.get_mut(target_location) {
                 b
@@ -147,7 +193,9 @@ pub fn scan_location_files(app_state: Arc<AppState>, location_path: &str) {
                     .entry(target_location.clone())
                     .or_default()
             };
-            batch.push(file);
+            for f in files_to_add {
+                batch.push(f);
+            }
 
             // periodically flush batches to database and memory
             if batch.len() >= BATCH_SIZE {
@@ -201,6 +249,67 @@ fn test_is_archive_path_basic() {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn test_scan_zip_members() {
+        use std::io::Write;
+        use zip::write::FileOptions;
+        use zip::ZipWriter;
+
+        let temp_dir = tempdir().unwrap();
+        let root_path = temp_dir.path().to_str().unwrap().to_string();
+        let archive_path = temp_dir.path().join("test.zip");
+
+        // create archive with 2 members
+        {
+            let file = std::fs::File::create(&archive_path).unwrap();
+            let mut zip = ZipWriter::new(file);
+            let options: FileOptions<()> = FileOptions::default();
+            zip.start_file("member1.txt", options.clone()).unwrap();
+            zip.write_all(b"hello").unwrap();
+            zip.start_file("member2.txt", options).unwrap();
+            zip.write_all(b"world").unwrap();
+            zip.finish().unwrap();
+        }
+
+        let db_dir = tempdir().unwrap();
+        let sqlite_path = db_dir.path().join("test.fkproj");
+        let app_state = Arc::new(AppState::default());
+        app_state
+            .connect_sqlite(sqlite_path.to_str().unwrap())
+            .unwrap();
+
+        app_state.add_location(
+            true,
+            &root_path,
+            &FileKrakenLocationType::Normal,
+            &FileKrakenLocationState::Unscanned,
+        );
+
+        scan_location_files(app_state.clone(), &root_path);
+
+        let files = app_state.get_files_by_location(&root_path).unwrap();
+        let files_lock = files.read().unwrap();
+
+        assert!(files_lock.contains_key(archive_path.to_str().unwrap()));
+
+        let m1_path = format!("{}::0::member1.txt", archive_path.to_str().unwrap());
+        let m2_path = format!("{}::1::member2.txt", archive_path.to_str().unwrap());
+
+        assert!(files_lock.contains_key(&m1_path), "Missing member 1");
+        assert!(files_lock.contains_key(&m2_path), "Missing member 2");
+
+        let m1 = files_lock.get(&m1_path).unwrap();
+        assert_eq!(
+            m1.file_type,
+            crate::state::file::FileKrakenFileType::ArchiveMember
+        );
+        assert_eq!(m1.file_len, 5);
+        assert_eq!(
+            m1.archive_path.as_ref().unwrap(),
+            archive_path.to_str().unwrap()
+        );
+    }
     use super::*;
     use crate::state::location::FileKrakenLocationType;
     use std::fs;

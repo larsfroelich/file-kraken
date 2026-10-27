@@ -2,7 +2,7 @@ use crate::processing::find_duplicates::{FindDuplicatesState, FindDuplicatesStat
 use crate::state::file::{FileKrakenFile, FileKrakenFileType};
 use crate::state::location::{FileKrakenLocation, FileKrakenLocationState, FileKrakenLocationType};
 use crate::utils::dialogs::error_dialog;
-use crate::utils::hashing::hash_file;
+use crate::utils::hashing::{hash_archive_member, hash_file};
 use crate::utils::parent_path::get_longest_parent_path;
 use rusqlite::OptionalExtension;
 use std::collections::HashMap;
@@ -40,11 +40,19 @@ impl AppState {
                 time_created INTEGER NOT NULL,
                 time_modified INTEGER NOT NULL,
                 hash_256 TEXT,
+                archive_path TEXT,
+                archive_size INTEGER,
+                archive_mtime INTEGER,
 
                 FOREIGN KEY(location_path) REFERENCES locations(path)
             );",
             [],
         )?;
+
+        // Add new columns to the files table if they don't exist yet (for legacy projects)
+        let _ = connection.execute("ALTER TABLE files ADD COLUMN archive_path TEXT;", []);
+        let _ = connection.execute("ALTER TABLE files ADD COLUMN archive_size INTEGER;", []);
+        let _ = connection.execute("ALTER TABLE files ADD COLUMN archive_mtime INTEGER;", []);
         connection.execute(
             "CREATE INDEX IF NOT EXISTS file_location_index 
                 ON files(location_path);",
@@ -121,6 +129,9 @@ impl AppState {
                     row.get(3)?,
                     row.get(4)?,
                     hash,
+                    None,
+                    None,
+                    None,
                 )
             }
         }
@@ -206,19 +217,58 @@ impl AppState {
     }
 
     pub fn calculate_file_hash(&self, file_path: &str) -> Option<String> {
-        // Check if this file has an existing hash in DB
-        let hash_result = self.with_sqlite_conn(|conn| {
-            conn.prepare_cached("SELECT hash_256 FROM files WHERE path = ?1;")?
-                .query_row([file_path], |row| row.get::<_, Option<String>>(0))
-                .optional()
+        let hash_info_result = self.with_sqlite_conn(|conn| {
+            conn.prepare_cached(
+                "SELECT hash_256, file_type, archive_path FROM files WHERE path = ?1;",
+            )?
+            .query_row([file_path], |row| {
+                let h: Option<String> = row.get(0)?;
+                let ft: String = row.get(1)?;
+                let ap: Option<String> = row.get(2)?;
+                Ok((h, ft, ap))
+            })
+            .optional()
         });
 
-        if let Some(Some(Some(existing_hash))) = hash_result {
-            return Some(existing_hash);
+        let mut file_type_str = "normal".to_string();
+        if let Some(Some(ref info)) = hash_info_result {
+            if info.0.is_some() {
+                return info.0.clone();
+            }
+            file_type_str = info.1.clone();
         }
 
-        // Compute hash only when DB has SQL NULL
-        match hash_file(file_path) {
+        let hash_computation = if file_type_str == "archive_member" {
+            if let Some(ap) = hash_info_result.clone().and_then(|h| h.unwrap().2) {
+                if let Some(rest) = file_path.strip_prefix(&format!("{}::", ap)) {
+                    let mut parts = rest.splitn(2, "::");
+                    let index_str = parts.next().unwrap_or("");
+                    let name = parts.next().unwrap_or("");
+                    if let Ok(index) = index_str.parse::<usize>() {
+                        hash_archive_member(&ap, index, name)
+                    } else {
+                        Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "Invalid archive member index",
+                        ))
+                    }
+                } else {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "Invalid archive member path format",
+                    ))
+                }
+            } else {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "Missing archive path for member",
+                ))
+            }
+        } else {
+            hash_file(file_path)
+        };
+
+        match hash_computation {
             Ok(hash) => {
                 let _ = self.with_sqlite_conn(|conn| {
                     conn.execute(
@@ -339,6 +389,7 @@ impl AppState {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     pub fn add_file(
         &self,
         persist_to_db: bool,
@@ -348,6 +399,9 @@ impl AppState {
         time_created: u64,
         time_modified: u64,
         hash: Option<String>,
+        archive_path: Option<String>,
+        archive_size: Option<u64>,
+        archive_mtime: Option<u64>,
     ) {
         let parent_location =
             get_longest_parent_path(file_path, self.get_locations_list_readonly().iter())
@@ -362,10 +416,14 @@ impl AppState {
             time_created,
             time_modified,
             hash,
+            archive_path,
+            archive_size,
+            archive_mtime,
         )
     }
 
     /// Adds a single file to a specific location and persists it to the database if required.
+    #[allow(clippy::too_many_arguments)]
     #[allow(clippy::too_many_arguments)]
     pub fn add_file_to_location(
         &self,
@@ -377,6 +435,9 @@ impl AppState {
         time_created: u64,
         time_modified: u64,
         hash: Option<String>,
+        archive_path: Option<String>,
+        archive_size: Option<u64>,
+        archive_mtime: Option<u64>,
     ) {
         self.add_files_to_location(
             persist_to_db,
@@ -388,6 +449,9 @@ impl AppState {
                 time_created,
                 time_modified,
                 hash,
+                archive_path,
+                archive_size,
+                archive_mtime,
             }],
         );
     }
@@ -418,15 +482,21 @@ impl AppState {
                                 file_len,
                                 time_created,
                                 time_modified,
-                                hash_256
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                                hash_256,
+                                archive_path,
+                                archive_size,
+                                archive_mtime
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             ON CONFLICT(path) DO UPDATE SET
                                 location_path = excluded.location_path,
                                 file_type = excluded.file_type,
                                 file_len = excluded.file_len,
                                 time_created = excluded.time_created,
                                 time_modified = excluded.time_modified,
-                                hash_256 = NULL;",
+                                hash_256 = NULL,
+                                archive_path = excluded.archive_path,
+                                archive_size = excluded.archive_size,
+                                archive_mtime = excluded.archive_mtime;",
                         )
                         .ok()?;
 
@@ -439,6 +509,9 @@ impl AppState {
                             file.time_created,
                             file.time_modified,
                             file.hash,
+                            file.archive_path,
+                            file.archive_size,
+                            file.archive_mtime
                         ])
                         .ok()?;
                     }
@@ -795,6 +868,9 @@ fn add_file_to_location_persists_archive_file_type() {
         20,
         30,
         None,
+        None,
+        None,
+        None,
     );
     state.close_project();
 
@@ -846,6 +922,9 @@ fn remove_location_persisted_does_not_reload_from_same_project_file() {
         10,
         100,
         100,
+        None,
+        None,
+        None,
         None,
     );
     app_state.remove_location(true, "/tmp/remove-me");

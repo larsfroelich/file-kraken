@@ -97,7 +97,8 @@ impl eframe::App for FileKrakenApp {
                                     .duration_since(std::time::UNIX_EPOCH)
                                     .unwrap_or_default()
                                     .as_secs();
-                                let temp_file = dir.join(format!("file-kraken-temp-{}.fkrproj", ts));
+                                let temp_file =
+                                    dir.join(format!("file-kraken-temp-{}.fkrproj", ts));
                                 if let Some(path) = temp_file.to_str() {
                                     self.temp_project_path = Some(path.to_string());
                                     try_connect_sqlite(self, path);
