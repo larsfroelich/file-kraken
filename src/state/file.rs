@@ -9,6 +9,25 @@ pub struct FileKrakenFile {
     pub time_created: u64,
     pub time_modified: u64,
     pub hash: Option<String>,
+    pub archive_path: Option<String>,
+    pub archive_size: Option<u64>,
+    pub archive_mtime: Option<u64>,
+}
+
+impl FileKrakenFile {
+    pub fn display_path(&self) -> String {
+        if let Some(archive_path) = &self.archive_path {
+            if let Some(rest) = self.path.strip_prefix(&format!("{}::", archive_path)) {
+                let parts: Vec<&str> = rest.splitn(2, "::").collect();
+                if parts.len() == 2 {
+                    return format!("{}::{}", archive_path, parts[1]);
+                }
+            }
+            self.path.clone()
+        } else {
+            self.path.clone()
+        }
+    }
 }
 
 #[derive(PartialEq, Default, Debug, Clone)]
@@ -16,6 +35,7 @@ pub enum FileKrakenFileType {
     #[default]
     Normal,
     Archive,
+    ArchiveMember,
 }
 
 impl FileKrakenFileType {
@@ -23,6 +43,7 @@ impl FileKrakenFileType {
         match self {
             FileKrakenFileType::Normal => "normal",
             FileKrakenFileType::Archive => "archive",
+            FileKrakenFileType::ArchiveMember => "archive_member",
         }
     }
 }

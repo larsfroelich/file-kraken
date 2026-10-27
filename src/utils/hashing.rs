@@ -5,20 +5,12 @@ thread_local! {
     static BUFFER: std::cell::RefCell<Vec<u8>> = std::cell::RefCell::new(vec![0; 8 * 1024 * 1024]);
 }
 
-/// Calculate the SHA256 hash of a file.
-///
-/// Instead of panicking on IO errors, this function now
-/// returns a `Result` so callers can react appropriately.
-pub fn hash_file(file_path: &str) -> io::Result<String> {
-    use std::io::Read;
-
+pub fn hash_stream<R: io::Read>(mut stream: R) -> io::Result<String> {
     let mut hasher = Sha256::new();
-    let mut file = fs::File::open(file_path)?;
-
     BUFFER.with(|buf| {
         let mut buffer = buf.borrow_mut();
         loop {
-            let count = file.read(&mut buffer)?;
+            let count = stream.read(&mut buffer)?;
             if count == 0 {
                 break;
             }
@@ -26,8 +18,36 @@ pub fn hash_file(file_path: &str) -> io::Result<String> {
         }
         Ok::<(), io::Error>(())
     })?;
-
     Ok(format!("{:X}", hasher.finalize()))
+}
+
+pub fn hash_file(file_path: &str) -> io::Result<String> {
+    let file = fs::File::open(file_path)?;
+    hash_stream(file)
+}
+
+pub fn hash_archive_member(
+    archive_path: &str,
+    member_index: usize,
+    member_name: &str,
+) -> io::Result<String> {
+    let file = fs::File::open(archive_path)?;
+    let mut zip =
+        zip::ZipArchive::new(file).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+    let mut member = zip
+        .by_index(member_index)
+        .map_err(|e| io::Error::new(io::ErrorKind::NotFound, e))?;
+
+    let raw_name = String::from_utf8_lossy(member.name_raw()).into_owned();
+    if raw_name != member_name {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Member name mismatch",
+        ));
+    }
+
+    hash_stream(&mut member)
 }
 
 #[cfg(test)]
